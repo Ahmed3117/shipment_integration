@@ -1,0 +1,577 @@
+{
+	"info": {
+		"_postman_id": "shipping-integration-api",
+		"name": "Shipping Integration API",
+		"description": "API collection for Shipping Integration Backend",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api"
+		},
+		{
+			"key": "access_token",
+			"value": ""
+		}
+	],
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"testuser\",\n    \"email\": \"testuser@example.com\",\n    \"password\": \"SecurePass123!\",\n    \"password_confirm\": \"SecurePass123!\",\n    \"company_name\": \"Test Company\",\n    \"phone\": \"1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/register/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "register", ""]
+						},
+						"description": "Register a new user account"
+					},
+					"response": []
+				},
+				{
+					"name": "Login (Get Token)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.access) {",
+									"    pm.collectionVariables.set('access_token', jsonData.access);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"SecurePass123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login", ""]
+						},
+						"description": "Login and get JWT access token"
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh\": \"your_refresh_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/token/refresh/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "token", "refresh", ""]
+						},
+						"description": "Refresh JWT access token"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/profile/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "profile", ""]
+						},
+						"description": "Get current user profile"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company_name\": \"Updated Company Name\",\n    \"phone\": \"9876543210\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/profile/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "profile", ""]
+						},
+						"description": "Update current user profile"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Services",
+			"item": [
+				{
+					"name": "List Service Types",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/services/",
+							"host": ["{{base_url}}"],
+							"path": ["services", ""]
+						},
+						"description": "List all available shipping service types"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Rates",
+			"item": [
+				{
+					"name": "Calculate Shipping Rates",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"origin_city\": \"New York\",\n    \"origin_state\": \"NY\",\n    \"origin_zip_code\": \"10001\",\n    \"origin_country\": \"USA\",\n    \"destination_city\": \"Los Angeles\",\n    \"destination_state\": \"CA\",\n    \"destination_zip_code\": \"90001\",\n    \"destination_country\": \"USA\",\n    \"weight\": 5.5,\n    \"length\": 30,\n    \"width\": 20,\n    \"height\": 15\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/rates/calculate/",
+							"host": ["{{base_url}}"],
+							"path": ["rates", "calculate", ""]
+						},
+						"description": "Calculate shipping rates for a package"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Shipments",
+			"item": [
+				{
+					"name": "Create Shipment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"reference_number\": \"ORDER-12345\",\n    \"sender_address\": {\n        \"name\": \"John Sender\",\n        \"street\": \"123 Main St\",\n        \"city\": \"New York\",\n        \"state\": \"NY\",\n        \"zip_code\": \"10001\",\n        \"country\": \"USA\",\n        \"phone\": \"1234567890\"\n    },\n    \"receiver_address\": {\n        \"name\": \"Jane Receiver\",\n        \"street\": \"456 Oak Ave\",\n        \"city\": \"Los Angeles\",\n        \"state\": \"CA\",\n        \"zip_code\": \"90001\",\n        \"country\": \"USA\",\n        \"phone\": \"0987654321\"\n    },\n    \"weight\": 5.5,\n    \"length\": 30,\n    \"width\": 20,\n    \"height\": 15,\n    \"content_description\": \"Books - Fiction novels\",\n    \"service_type\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/shipments/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ""]
+						},
+						"description": "Create a new shipment"
+					},
+					"response": []
+				},
+				{
+					"name": "List Shipments",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/shipments/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ""],
+							"query": [
+								{
+									"key": "start_date",
+									"value": "2024-01-01",
+									"disabled": true
+								},
+								{
+									"key": "end_date",
+									"value": "2024-12-31",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "confirmed",
+									"disabled": true
+								}
+							]
+						},
+						"description": "List all shipments with optional filters"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Shipment Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/shipments/:shipment_id/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ":shipment_id", ""],
+							"variable": [
+								{
+									"key": "shipment_id",
+									"value": "your-shipment-uuid-here"
+								}
+							]
+						},
+						"description": "Get details of a specific shipment"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Shipment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/shipments/:shipment_id/cancel/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ":shipment_id", "cancel", ""],
+							"variable": [
+								{
+									"key": "shipment_id",
+									"value": "your-shipment-uuid-here"
+								}
+							]
+						},
+						"description": "Cancel a shipment"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Shipment Label",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/shipments/:shipment_id/label/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ":shipment_id", "label", ""],
+							"variable": [
+								{
+									"key": "shipment_id",
+									"value": "your-shipment-uuid-here"
+								}
+							]
+						},
+						"description": "Get shipping label for a shipment"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Shipment Status",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"in_transit\",\n    \"description\": \"Package arrived at sorting facility\",\n    \"location\": \"Chicago, IL\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/shipments/:shipment_id/status/",
+							"host": ["{{base_url}}"],
+							"path": ["shipments", ":shipment_id", "status", ""],
+							"variable": [
+								{
+									"key": "shipment_id",
+									"value": "your-shipment-uuid-here"
+								}
+							]
+						},
+						"description": "Update shipment status and trigger webhooks. Available statuses: pending, confirmed, picked_up, in_transit, out_for_delivery, delivered, cancelled, returned"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Tracking",
+			"item": [
+				{
+					"name": "Track Shipment",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/track/:tracking_number/",
+							"host": ["{{base_url}}"],
+							"path": ["track", ":tracking_number", ""],
+							"variable": [
+								{
+									"key": "tracking_number",
+									"value": "SHP123456789012"
+								}
+							]
+						},
+						"description": "Track a shipment by tracking number (public endpoint)"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Address Validation",
+			"item": [
+				{
+					"name": "Validate Address",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"street\": \"123 Main St\",\n    \"city\": \"New York\",\n    \"state\": \"NY\",\n    \"zip_code\": \"10001\",\n    \"country\": \"USA\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/address/validate/",
+							"host": ["{{base_url}}"],
+							"path": ["address", "validate", ""]
+						},
+						"description": "Validate a shipping address"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Webhooks",
+			"item": [
+				{
+					"name": "Register Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"url\": \"https://your-domain.com/webhooks/shipping\",\n    \"event\": \"shipment.status_changed\",\n    \"is_active\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/",
+							"host": ["{{base_url}}"],
+							"path": ["webhooks", ""]
+						},
+						"description": "Register a new webhook"
+					},
+					"response": []
+				},
+				{
+					"name": "List Webhooks",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/webhooks/",
+							"host": ["{{base_url}}"],
+							"path": ["webhooks", ""]
+						},
+						"description": "List all registered webhooks"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Webhook Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/webhooks/:webhook_id/",
+							"host": ["{{base_url}}"],
+							"path": ["webhooks", ":webhook_id", ""],
+							"variable": [
+								{
+									"key": "webhook_id",
+									"value": "1"
+								}
+							]
+						},
+						"description": "Get details of a specific webhook"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Webhook",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"is_active\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/:webhook_id/",
+							"host": ["{{base_url}}"],
+							"path": ["webhooks", ":webhook_id", ""],
+							"variable": [
+								{
+									"key": "webhook_id",
+									"value": "1"
+								}
+							]
+						},
+						"description": "Update a webhook"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Webhook",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/webhooks/:webhook_id/",
+							"host": ["{{base_url}}"],
+							"path": ["webhooks", ":webhook_id", ""],
+							"variable": [
+								{
+									"key": "webhook_id",
+									"value": "1"
+								}
+							]
+						},
+						"description": "Delete a webhook"
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
