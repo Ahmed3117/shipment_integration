@@ -84,7 +84,7 @@ def send_webhook_notification(shipment: Shipment, event: str):
             logger.error(f"Webhook failed for {webhook.url}: {str(e)}")
 
 
-def update_shipment_status(shipment: Shipment, new_status: str, description: str = None, location: str = ''):
+def update_shipment_status(shipment: Shipment, new_status: str, description: str = None, location: str = '', created_by=None):
     """
     Update shipment status. Webhooks are triggered automatically via signals.
     
@@ -93,6 +93,7 @@ def update_shipment_status(shipment: Shipment, new_status: str, description: str
         new_status: The new status value
         description: Optional description for the tracking event
         location: Optional location for the tracking event
+        created_by: Optional user (carrier/admin) who created this event
     """
     from .models import TrackingEvent
     
@@ -105,5 +106,6 @@ def update_shipment_status(shipment: Shipment, new_status: str, description: str
         shipment=shipment,
         status=new_status,
         description=description or f"Status changed from {old_status} to {new_status}",
-        location=location
+        location=location,
+        created_by=created_by
     )

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
+from decimal import Decimal
 from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook
 
 
@@ -22,9 +23,34 @@ class AddressSerializer(serializers.ModelSerializer):
 
 
 class ServiceTypeSerializer(serializers.ModelSerializer):
+    """Serializer for public service type listing."""
     class Meta:
         model = ServiceType
         fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max']
+
+
+class ServiceTypeAdminSerializer(serializers.ModelSerializer):
+    """Serializer for admin service type management (full CRUD)."""
+    class Meta:
+        model = ServiceType
+        fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max', 'is_active']
+    
+    def validate_code(self, value):
+        """Ensure code is lowercase and alphanumeric with underscores only."""
+        import re
+        if not re.match(r'^[a-z0-9_]+$', value.lower()):
+            raise serializers.ValidationError('Code must contain only lowercase letters, numbers, and underscores.')
+        return value.lower()
+    
+    def validate(self, data):
+        """Ensure min days <= max days."""
+        min_days = data.get('estimated_days_min')
+        max_days = data.get('estimated_days_max')
+        if min_days and max_days and min_days > max_days:
+            raise serializers.ValidationError({
+                'estimated_days_min': 'Minimum days cannot be greater than maximum days.'
+            })
+        return data
 
 
 # --- Rate Calculation Serializers ---
@@ -39,10 +65,10 @@ class RateCalculationRequestSerializer(serializers.Serializer):
     destination_zip_code = serializers.CharField(max_length=20)
     destination_country = serializers.CharField(max_length=100, default='USA')
     
-    weight = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
-    length = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
-    width = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
-    height = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0.01)
+    weight = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+    length = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+    width = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
+    height = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
 
 
 class RateOptionSerializer(serializers.Serializer):
@@ -103,7 +129,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
             receiver_address=receiver,
             estimated_cost=estimated_cost,
             estimated_delivery_date=estimated_delivery_date,
-            status='confirmed',
+            status='created',
             label_url=f'/api/shipments/{{shipment_id}}/label/',
             **validated_data
         )
@@ -111,8 +137,8 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         # Create initial tracking event
         TrackingEvent.objects.create(
             shipment=shipment,
-            status='confirmed',
-            description='Shipment created and confirmed.',
+            status='created',
+            description='Shipment created successfully.',
             location=f"{sender.city}, {sender.state}"
         )
         
@@ -196,10 +222,73 @@ class AddressValidationResponseSerializer(serializers.Serializer):
 # --- Status Update Serializer ---
 class ShipmentStatusUpdateSerializer(serializers.Serializer):
     STATUS_CHOICES = [
-        'pending', 'confirmed', 'picked_up', 'in_transit',
+        'created', 'picked_up', 'in_transit',
         'out_for_delivery', 'delivered', 'cancelled', 'returned'
     ]
     
     status = serializers.ChoiceField(choices=STATUS_CHOICES)
     description = serializers.CharField(required=False, allow_blank=True)
-    location = serializers.CharField(required=False, allow_blank=True, default='')
+    location = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)
+
+
+# --- Carrier Serializers ---
+class CarrierShipmentListSerializer(serializers.ModelSerializer):
+    """Serializer for carriers to view their assigned shipments."""
+    sender_address = AddressSerializer(read_only=True)
+    receiver_address = AddressSerializer(read_only=True)
+    service_type = ServiceTypeSerializer(read_only=True)
+    customer_name = serializers.CharField(source='user.company_name', read_only=True)
+    
+    class Meta:
+        model = Shipment
+        fields = [
+            'id', 'tracking_number', 'reference_number', 'status',
+            'sender_address', 'receiver_address',
+            'weight', 'content_description',
+            'service_type', 'estimated_cost', 'estimated_delivery_date',
+            'customer_name', 'created_at'
+        ]
+
+
+class CarrierStatusUpdateSerializer(serializers.Serializer):
+    """Serializer for carrier to update shipment status by scanning."""
+    CARRIER_STATUS_CHOICES = [
+        'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'
+    ]
+    
+    reference_number = serializers.CharField(max_length=100, required=False)
+    tracking_number = serializers.CharField(max_length=50, required=False)
+    status = serializers.ChoiceField(choices=CARRIER_STATUS_CHOICES)
+    description = serializers.CharField(required=False, allow_blank=True)
+    location = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)
+    
+    def validate(self, attrs):
+        if not attrs.get('reference_number') and not attrs.get('tracking_number'):
+            raise serializers.ValidationError(
+                'Either reference_number or tracking_number must be provided.'
+            )
+        return attrs
+
+
+class TrackingEventDetailSerializer(serializers.ModelSerializer):
+    """Tracking event with carrier info."""
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True, default=None)
+    
+    class Meta:
+        model = TrackingEvent
+        fields = ['id', 'status', 'description', 'location', 'created_by_name', 'timestamp']
+
+
+class AssignCarrierSerializer(serializers.Serializer):
+    """Serializer for assigning a carrier to a shipment."""
+    carrier_id = serializers.IntegerField()
+    
+    def validate_carrier_id(self, value):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        try:
+            carrier = User.objects.get(id=value, user_type='carrier')
+        except User.DoesNotExist:
+            raise serializers.ValidationError('Carrier not found or user is not a carrier.')
+        return value
+

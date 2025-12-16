@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from django.db import models
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -8,6 +9,7 @@ from django.shortcuts import get_object_or_404
 from .models import ServiceType, Shipment, TrackingEvent, Webhook
 from .serializers import (
     ServiceTypeSerializer,
+    ServiceTypeAdminSerializer,
     RateCalculationRequestSerializer,
     RateOptionSerializer,
     ShipmentCreateSerializer,
@@ -19,15 +21,68 @@ from .serializers import (
     AddressValidationSerializer,
     AddressValidationResponseSerializer,
     ShipmentStatusUpdateSerializer,
+    CarrierShipmentListSerializer,
+    CarrierStatusUpdateSerializer,
+    AssignCarrierSerializer,
 )
 from .services import update_shipment_status, send_webhook_notification
+from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin
 
 
-# --- Service Types ---
+# --- Service Types (Public) ---
 class ServiceTypeListView(generics.ListAPIView):
-    """List all available shipping service types."""
+    """List all active shipping service types (public endpoint)."""
     queryset = ServiceType.objects.filter(is_active=True)
     serializer_class = ServiceTypeSerializer
+    permission_classes = [AllowAny]
+
+
+# --- Service Types (Admin CRUD) ---
+class AdminServiceTypeListCreateView(generics.ListCreateAPIView):
+    """
+    Admin endpoint to list all service types (including inactive) and create new ones.
+    
+    GET: List all service types
+    POST: Create a new service type
+    """
+    queryset = ServiceType.objects.all()
+    serializer_class = ServiceTypeAdminSerializer
+    permission_classes = [IsAdmin]
+    
+    def get_queryset(self):
+        queryset = ServiceType.objects.all()
+        # Optional filter by is_active
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        return queryset.order_by('name')
+
+
+class AdminServiceTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Admin endpoint to get, update, or delete a service type.
+    
+    GET: Get service type details
+    PUT/PATCH: Update service type
+    DELETE: Delete service type (only if not used in any shipment)
+    """
+    queryset = ServiceType.objects.all()
+    serializer_class = ServiceTypeAdminSerializer
+    permission_classes = [IsAdmin]
+    
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # Check if service type is in use
+        shipment_count = Shipment.objects.filter(service_type=instance).count()
+        if shipment_count > 0:
+            return Response(
+                {
+                    'error': f'Cannot delete service type. It is used in {shipment_count} shipment(s).',
+                    'suggestion': 'Consider deactivating it instead by setting is_active to false.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 # --- Rate Calculation ---
@@ -154,7 +209,7 @@ class ShipmentCancelView(generics.GenericAPIView):
             shipment=shipment,
             status='cancelled',
             description='Shipment cancelled by user.',
-            location=''
+            location=None
         )
         
         return Response({
@@ -330,4 +385,173 @@ class ShipmentStatusUpdateView(generics.GenericAPIView):
             'tracking_number': shipment.tracking_number,
             'new_status': new_status,
             'webhook_triggered': True
+        })
+
+
+# --- Carrier Views ---
+class CarrierShipmentListView(generics.ListAPIView):
+    """
+    List all shipments assigned to the carrier.
+    Carriers can filter by status and date range.
+    """
+    serializer_class = CarrierShipmentListSerializer
+    permission_classes = [IsCarrier]
+    
+    def get_queryset(self):
+        queryset = Shipment.objects.filter(carrier=self.request.user)
+        
+        # Filter by status
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        # Filter by date range
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if start_date:
+            queryset = queryset.filter(created_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(created_at__date__lte=end_date)
+        
+        return queryset.order_by('-created_at')
+
+
+class CarrierShipmentDetailView(generics.RetrieveAPIView):
+    """
+    Retrieve shipment details for carrier.
+    Allows lookup by pk, tracking_number, or reference_number.
+    """
+    serializer_class = ShipmentDetailSerializer
+    permission_classes = [IsCarrier]
+    
+    def get_object(self):
+        # Support lookup by pk, tracking_number, or reference_number
+        lookup_value = self.kwargs.get('lookup_value')
+        
+        # Try by UUID first
+        try:
+            import uuid
+            uuid.UUID(lookup_value)
+            return get_object_or_404(Shipment, pk=lookup_value, carrier=self.request.user)
+        except (ValueError, AttributeError):
+            pass
+        
+        # Try by tracking_number or reference_number
+        shipment = Shipment.objects.filter(
+            carrier=self.request.user
+        ).filter(
+            models.Q(tracking_number=lookup_value) | models.Q(reference_number=lookup_value)
+        ).first()
+        
+        if not shipment:
+            from django.http import Http404
+            raise Http404("Shipment not found.")
+        
+        return shipment
+
+
+class CarrierStatusUpdateByScanView(generics.GenericAPIView):
+    """
+    Update shipment status by scanning reference_number or tracking_number.
+    This is the primary endpoint for carriers to update status via mobile scanning.
+    """
+    serializer_class = CarrierStatusUpdateSerializer
+    permission_classes = [IsCarrier]
+    
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        reference_number = data.get('reference_number')
+        tracking_number = data.get('tracking_number')
+        new_status = data['status']
+        description = data.get('description', '')
+        location = data.get('location', '')
+        
+        # Find shipment by reference_number or tracking_number
+        shipment = None
+        if reference_number:
+            shipment = Shipment.objects.filter(
+                reference_number=reference_number,
+                carrier=request.user
+            ).first()
+        elif tracking_number:
+            shipment = Shipment.objects.filter(
+                tracking_number=tracking_number,
+                carrier=request.user
+            ).first()
+        
+        if not shipment:
+            return Response({
+                'error': 'Shipment not found or not assigned to you.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validate status transition
+        if shipment.status == 'cancelled':
+            return Response({
+                'error': 'Cannot update status of a cancelled shipment.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if shipment.status == 'delivered' and new_status != 'returned':
+            return Response({
+                'error': 'Delivered shipment can only be changed to returned.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update status and send webhooks, recording the carrier who made the update
+        update_shipment_status(
+            shipment=shipment,
+            new_status=new_status,
+            description=description,
+            location=location,
+            created_by=request.user
+        )
+        
+        return Response({
+            'message': f'Shipment status updated to {new_status}.',
+            'shipment_id': str(shipment.id),
+            'tracking_number': shipment.tracking_number,
+            'reference_number': shipment.reference_number,
+            'new_status': new_status,
+            'updated_by': request.user.email
+        })
+
+
+class AssignCarrierView(generics.GenericAPIView):
+    """
+    Assign a carrier to a shipment. Only admin users can assign carriers.
+    """
+    serializer_class = AssignCarrierSerializer
+    
+    def post(self, request, pk):
+        # Check if user is admin
+        if not request.user.is_staff and request.user.user_type != 'admin':
+            return Response({
+                'error': 'Only admin users can assign carriers.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        shipment = get_object_or_404(Shipment, pk=pk)
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        carrier_id = serializer.validated_data['carrier_id']
+        
+        from accounts.models import User
+        carrier = get_object_or_404(User, pk=carrier_id)
+        
+        if not carrier.is_carrier:
+            return Response({
+                'error': 'The specified user is not a carrier.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        shipment.carrier = carrier
+        shipment.save()
+        
+        return Response({
+            'message': 'Carrier assigned successfully.',
+            'shipment_id': str(shipment.id),
+            'tracking_number': shipment.tracking_number,
+            'carrier_id': str(carrier.id),
+            'carrier_email': carrier.email
         })

@@ -10,7 +10,7 @@ class Address(models.Model):
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
     zip_code = models.CharField(max_length=20)
-    country = models.CharField(max_length=100, default='USA')
+    country = models.CharField(max_length=100, default='Egypt')
     phone = models.CharField(max_length=20)
     
     class Meta:
@@ -41,8 +41,7 @@ class ServiceType(models.Model):
 class Shipment(models.Model):
     """Main shipment model."""
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('confirmed', 'Confirmed'),
+        ('created', 'Created'),
         ('picked_up', 'Picked Up'),
         ('in_transit', 'In Transit'),
         ('out_for_delivery', 'Out for Delivery'),
@@ -52,7 +51,20 @@ class Shipment(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='shipments')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='shipments',
+        help_text='The customer (e-commerce company) who created this shipment'
+    )
+    carrier = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='carrier_shipments',
+        help_text='Assigned carrier for this shipment'
+    )
     tracking_number = models.CharField(max_length=50, unique=True, blank=True)
     reference_number = models.CharField(max_length=100, blank=True, help_text='Customer order ID')
     
@@ -73,7 +85,7 @@ class Shipment(models.Model):
     estimated_delivery_date = models.DateField(null=True, blank=True)
     
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='created')
     
     # Label
     label_url = models.URLField(blank=True)
@@ -106,7 +118,15 @@ class TrackingEvent(models.Model):
     shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='tracking_events')
     status = models.CharField(max_length=50)
     description = models.TextField(blank=True, null=True)
-    location = models.CharField(max_length=255, blank=True)
+    location = models.CharField(max_length=255, blank=True, null=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tracking_events',
+        help_text='User (carrier/admin) who created this event'
+    )
     timestamp = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -125,7 +145,12 @@ class Webhook(models.Model):
         ('shipment.delivered', 'Shipment Delivered'),
     ]
     
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='webhooks')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='webhooks',
+        help_text='The customer (e-commerce company) who registered this webhook'
+    )
     url = models.URLField()
     event = models.CharField(max_length=50, choices=EVENT_CHOICES)
     is_active = models.BooleanField(default=True)
