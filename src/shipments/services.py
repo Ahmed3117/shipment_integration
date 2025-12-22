@@ -23,16 +23,15 @@ def generate_webhook_signature(secret: str, payload: str) -> str:
 
 def send_webhook_notification(shipment: Shipment, event: str):
     """
-    Send webhook notifications to all registered URLs for the given event.
+    Send webhook notifications to all registered URLs for the company.
     
     Args:
         shipment: The Shipment instance that triggered the event
         event: The event type (e.g., 'shipment.status_changed')
     """
-    # Get all active webhooks for this user and event
+    # Get all active webhooks for this company
     webhooks = Webhook.objects.filter(
-        user=shipment.user,
-        event=event,
+        company=shipment.company,
         is_active=True
     )
     
@@ -59,7 +58,7 @@ def send_webhook_notification(shipment: Shipment, event: str):
                 'X-Webhook-Event': event,
             }
             
-            # Add signature if secret is set
+            # Add signature using the webhook secret
             if webhook.secret:
                 signature = generate_webhook_signature(webhook.secret, payload_json)
                 headers['X-Webhook-Signature'] = signature

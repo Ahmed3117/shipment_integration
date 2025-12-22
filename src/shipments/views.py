@@ -18,15 +18,16 @@ from .serializers import (
     TrackingEventSerializer,
     TrackingResponseSerializer,
     WebhookSerializer,
-    AddressValidationSerializer,
-    AddressValidationResponseSerializer,
+    WebhookCreateSerializer,
+    WebhookDetailSerializer,
     ShipmentStatusUpdateSerializer,
     CarrierShipmentListSerializer,
     CarrierStatusUpdateSerializer,
     AssignCarrierSerializer,
 )
 from .services import update_shipment_status, send_webhook_notification
-from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin
+from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin, IsCompany, IsCompanyOrAdmin
+from accounts.authentication import CompanyUser
 
 
 # --- Service Types (Public) ---
@@ -137,38 +138,118 @@ class CalculateRatesView(generics.GenericAPIView):
 
 # --- Shipment CRUD ---
 class ShipmentListCreateView(generics.ListCreateAPIView):
-    """List shipments or create a new shipment."""
-    
+    """
+    List shipments or create a new shipment.
+    Requires Company token authentication.
+    """
+    permission_classes = [AllowAny]
+
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return ShipmentCreateSerializer
         return ShipmentListSerializer
-    
+
     def get_queryset(self):
-        queryset = Shipment.objects.filter(user=self.request.user)
-        
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Shipment.objects.none()
+
+        queryset = Shipment.objects.all()
+        # If Company token auth
+        if isinstance(user, CompanyUser):
+            return queryset.filter(company=user.company).order_by('-created_at')
+
+        # If superuser, they can see everything
+        if user.is_superuser:
+            return queryset.order_by('-created_at')
+
+        # Regular Admin/Staff
+        if hasattr(user, 'company') and user.company:
+            queryset = queryset.filter(company=user.company)
+        else:
+            # User has no company and is not superuser
+            return Shipment.objects.none()
+
+        return queryset.order_by('-created_at')
+
         # Filter by date range
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
         status_filter = self.request.query_params.get('status')
-        
+
         if start_date:
             queryset = queryset.filter(created_at__date__gte=start_date)
         if end_date:
             queryset = queryset.filter(created_at__date__lte=end_date)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-        
-        return queryset
-    
+
+        return queryset.order_by('-created_at')
+
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-    
+        user = self.request.user
+        from accounts.authentication import CompanyUser
+        company = None
+        if isinstance(user, CompanyUser):
+            company = user.company
+        elif user.is_superuser:
+            company = serializer.validated_data.get('company', None)
+            if not company:
+                raise serializers.ValidationError({'company': 'Company is required for superuser shipment creation.'})
+        elif hasattr(user, 'company') and user.company:
+            company = user.company
+        else:
+            raise serializers.ValidationError({'company': 'Company is required for shipment creation.'})
+        serializer.save(company=company)
+
     def create(self, request, *args, **kwargs):
+        user = request.user
+        company = None
+        
+        # 1. ALWAYS prioritize detecting company from CompanyTokenAuthentication first
+        if user and user.is_authenticated and isinstance(user, CompanyUser):
+            company = user.company
+        
+        # 2. If not a CompanyUser, check if they are a regular user with a company or a superuser
+        if not company and user and user.is_authenticated:
+            if user.is_superuser:
+                # Superuser can specify company in data explicitly
+                company_id = request.data.get('company_id') or request.data.get('company')
+                if company_id:
+                    from accounts.models import Company
+                    try:
+                        if str(company_id).isdigit():
+                            company = Company.objects.get(id=company_id)
+                        else:
+                            company = Company.objects.get(name=company_id)
+                    except (Company.DoesNotExist, ValueError):
+                        pass
+            elif hasattr(user, 'company') and user.company:
+                # Regular admin/carrier belonging to a company
+                company = user.company
+
+        # 3. If no company detected yet, explicitly require it
+        if not company:
+            return Response(
+                {'error': 'A valid company token (X-Company-Token) or company identification is required.'}, 
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        shipment = serializer.save(user=request.user)
-        
+
+        reference_number = serializer.validated_data.get('reference_number')
+        existing = None
+        if reference_number and company:
+            existing = Shipment.objects.filter(reference_number=reference_number, company=company).first()
+        if existing:
+            response_serializer = ShipmentDetailSerializer(existing)
+            return Response({
+                'message': 'Shipment with this reference_number already exists.',
+                'shipment': response_serializer.data
+            }, status=status.HTTP_200_OK)
+
+        shipment = serializer.save(company=company)
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response({
             'message': 'Shipment created successfully.',
@@ -176,21 +257,50 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
         }, status=status.HTTP_201_CREATED)
 
 
-class ShipmentDetailView(generics.RetrieveAPIView):
-    """Retrieve shipment details by ID."""
+class ShipmentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update, or delete shipment details by tracking number."""
     serializer_class = ShipmentDetailSerializer
-    lookup_field = 'pk'
-    
+    permission_classes = [IsAdmin]
+    lookup_field = 'tracking_number'
+    lookup_url_kwarg = 'tracking_number'
+
     def get_queryset(self):
-        return Shipment.objects.filter(user=self.request.user)
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Shipment.objects.none()
+
+        queryset = Shipment.objects.all()
+        if user.is_superuser:
+            return queryset
+
+        if isinstance(user, CompanyUser):
+            queryset = queryset.filter(company=user.company)
+        elif hasattr(user, 'company') and user.company:
+            queryset = queryset.filter(company=user.company)
+        else:
+            return Shipment.objects.none()
+
+        return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.status not in ['pending', 'cancelled']:
+            return Response(
+                {'error': 'Can only delete pending or cancelled shipments.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ShipmentCancelView(generics.GenericAPIView):
     """Cancel a shipment."""
     serializer_class = ShipmentDetailSerializer
+    permission_classes = [IsCompany]
     
-    def post(self, request, pk):
-        shipment = get_object_or_404(Shipment, pk=pk, user=request.user)
+    def post(self, request, tracking_number):
+        company = request.user.company
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, company=company)
         
         if shipment.status in ['delivered', 'cancelled']:
             return Response({
@@ -223,9 +333,11 @@ class ShipmentCancelView(generics.GenericAPIView):
 # --- Label ---
 class ShipmentLabelView(generics.GenericAPIView):
     """Get shipping label for a shipment."""
+    permission_classes = [IsCompany]
     
-    def get(self, request, pk):
-        shipment = get_object_or_404(Shipment, pk=pk, user=request.user)
+    def get(self, request, tracking_number):
+        company = request.user.company
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, company=company)
         
         if shipment.status == 'cancelled':
             return Response({
@@ -233,28 +345,64 @@ class ShipmentLabelView(generics.GenericAPIView):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # In a real implementation, this would generate or fetch the actual label
+        shipment_serializer = ShipmentDetailSerializer(shipment)
+        
         label_data = {
-            'shipment_id': str(shipment.id),
-            'tracking_number': shipment.tracking_number,
-            'label_format': 'PDF',
-            'label_url': f'/api/shipments/{shipment.id}/label/download/',
-            'label_zpl': None,  # Would contain ZPL data if requested
+            'shipment': shipment_serializer.data,
+            'label_info': {
+                'label_format': 'PDF',
+                'label_url': f'/api/shipments/{shipment.id}/label/download/',
+                'label_zpl': None,
+            }
         }
         
         return Response(label_data)
+
+
+class LabelDownloadView(generics.GenericAPIView):
+    """View to download the shipping label PDF."""
+    permission_classes = [AllowAny] # Allow public download if tracking number/ID is known
+    
+    def get(self, request, shipment_id):
+        # In a real app, this would return an actual PDF file
+        # Here we mock it with a simple text response or a redirect
+        from django.http import HttpResponse
+        
+        # Check if shipment_id is a UUID (from the label_url) or a tracking_number
+        if len(str(shipment_id)) > 20: # Likely a UUID
+            shipment = get_object_or_404(Shipment, id=shipment_id)
+        else:
+            shipment = get_object_or_404(Shipment, tracking_number=shipment_id)
+            
+        # Minimal valid PDF structure
+        pdf_content = (
+            b"%PDF-1.1\n"
+            b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            b"3 0 obj << /Type /Page /Parent 2 0 R /Resources << >> /Contents 4 0 R >> endobj\n"
+            b"4 0 obj << /Length 51 >> stream\n"
+            b"BT /F1 24 Tf 100 700 Td (Shipment Label: " + shipment.tracking_number.encode() + b") Tj ET\n"
+            b"endstream endobj\n"
+            b"xref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000056 00000 n \n0000000111 00000 n \n0000000183 00000 n \ntrailer << /Size 5 /Root 1 0 R >>\nstartxref\n284\n%%EOF"
+        )
+            
+        response = HttpResponse(pdf_content, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="label_{shipment.tracking_number}.pdf"'
+        return response
 
 
 # --- Tracking ---
 class TrackShipmentView(generics.GenericAPIView):
     """Track a shipment by tracking number."""
     permission_classes = [AllowAny]  # Allow public tracking
-    
+
     def get(self, request, tracking_number):
+        # Anyone can track a shipment by tracking number, no authentication required
         shipment = get_object_or_404(Shipment, tracking_number=tracking_number)
-        
+
         events = shipment.tracking_events.all()
         last_event = events.first() if events.exists() else None
-        
+
         response_data = {
             'tracking_number': shipment.tracking_number,
             'current_status': shipment.status,
@@ -263,76 +411,48 @@ class TrackShipmentView(generics.GenericAPIView):
             'estimated_delivery_date': shipment.estimated_delivery_date,
             'history': TrackingEventSerializer(events, many=True).data
         }
-        
-        return Response(response_data)
 
-
-# --- Address Validation ---
-class AddressValidationView(generics.GenericAPIView):
-    """Validate a shipping address."""
-    serializer_class = AddressValidationSerializer
-    
-    def post(self, request):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        data = serializer.validated_data
-        
-        # Simple validation logic (in real implementation, integrate with address validation service)
-        is_valid = True
-        message = 'Address is valid.'
-        
-        # Check zip code format
-        zip_code = data['zip_code']
-        if not zip_code or len(zip_code) < 3:
-            is_valid = False
-            message = 'Zip code not found.'
-        
-        # Check city/state
-        if not data['city'] or not data['state']:
-            is_valid = False
-            message = 'City and state are required.'
-        
-        response_data = {
-            'is_valid': is_valid,
-            'message': message,
-            'suggested_address': data if is_valid else None
-        }
-        
         return Response(response_data)
 
 
 # --- Webhooks ---
 class WebhookListCreateView(generics.ListCreateAPIView):
     """List or create webhooks."""
-    serializer_class = WebhookSerializer
+    permission_classes = [IsCompany]
+    
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return WebhookCreateSerializer
+        return WebhookSerializer
     
     def get_queryset(self):
-        return Webhook.objects.filter(user=self.request.user)
-    
-    def perform_create(self, serializer):
-        import secrets
-        secret = secrets.token_urlsafe(32)
-        serializer.save(user=self.request.user, secret=secret)
+        company = self.request.user.company
+        return Webhook.objects.filter(company=company)
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        webhook = self.perform_create(serializer)
+        
+        import secrets
+        company = request.user.company
+        secret = secrets.token_urlsafe(32)
+        webhook = serializer.save(company=company, secret=secret)
         
         return Response({
             'message': 'Webhook registered successfully.',
-            'webhook': serializer.data
+            'webhook': WebhookDetailSerializer(webhook).data
         }, status=status.HTTP_201_CREATED)
 
 
 class WebhookDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update, or delete a webhook."""
     serializer_class = WebhookSerializer
+    permission_classes = [IsCompany]
     lookup_field = 'pk'
     
     def get_queryset(self):
-        return Webhook.objects.filter(user=self.request.user)
+        company = self.request.user.company
+        return Webhook.objects.filter(company=company)
     
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -346,12 +466,13 @@ class WebhookDetailView(generics.RetrieveUpdateDestroyAPIView):
 class ShipmentStatusUpdateView(generics.GenericAPIView):
     """
     Update shipment status and trigger webhooks.
-    This endpoint would typically be used by carriers or admin.
+    This endpoint is used by carriers or admin.
     """
     serializer_class = ShipmentStatusUpdateSerializer
+    permission_classes = [IsCarrierOrAdmin]
     
-    def post(self, request, pk):
-        shipment = get_object_or_404(Shipment, pk=pk, user=request.user)
+    def post(self, request, tracking_number):
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number)
         
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -376,7 +497,8 @@ class ShipmentStatusUpdateView(generics.GenericAPIView):
             shipment=shipment,
             new_status=new_status,
             description=description,
-            location=location
+            location=location,
+            created_by=request.user
         )
         
         return Response({
@@ -419,35 +541,14 @@ class CarrierShipmentListView(generics.ListAPIView):
 class CarrierShipmentDetailView(generics.RetrieveAPIView):
     """
     Retrieve shipment details for carrier.
-    Allows lookup by pk, tracking_number, or reference_number.
+    Allows lookup by tracking_number.
     """
     serializer_class = ShipmentDetailSerializer
     permission_classes = [IsCarrier]
     
     def get_object(self):
-        # Support lookup by pk, tracking_number, or reference_number
-        lookup_value = self.kwargs.get('lookup_value')
-        
-        # Try by UUID first
-        try:
-            import uuid
-            uuid.UUID(lookup_value)
-            return get_object_or_404(Shipment, pk=lookup_value, carrier=self.request.user)
-        except (ValueError, AttributeError):
-            pass
-        
-        # Try by tracking_number or reference_number
-        shipment = Shipment.objects.filter(
-            carrier=self.request.user
-        ).filter(
-            models.Q(tracking_number=lookup_value) | models.Q(reference_number=lookup_value)
-        ).first()
-        
-        if not shipment:
-            from django.http import Http404
-            raise Http404("Shipment not found.")
-        
-        return shipment
+        tracking_number = self.kwargs.get('tracking_number')
+        return get_object_or_404(Shipment, tracking_number=tracking_number, carrier=self.request.user)
 
 
 class CarrierStatusUpdateByScanView(generics.GenericAPIView):
@@ -522,15 +623,10 @@ class AssignCarrierView(generics.GenericAPIView):
     Assign a carrier to a shipment. Only admin users can assign carriers.
     """
     serializer_class = AssignCarrierSerializer
+    permission_classes = [IsAdmin]
     
-    def post(self, request, pk):
-        # Check if user is admin
-        if not request.user.is_staff and request.user.user_type != 'admin':
-            return Response({
-                'error': 'Only admin users can assign carriers.'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        shipment = get_object_or_404(Shipment, pk=pk)
+    def post(self, request, tracking_number):
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number)
         
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)

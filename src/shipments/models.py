@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from django.db import models
 from django.conf import settings
 
@@ -22,9 +23,15 @@ class Address(models.Model):
 
 
 class ServiceType(models.Model):
-    """Shipping service types."""
-    name = models.CharField(max_length=100, unique=True)  # e.g., Standard, Express
-    code = models.CharField(max_length=50, unique=True)
+    """Shipping service types - can be company-specific or global."""
+    company = models.ForeignKey(
+        'accounts.Company',
+        on_delete=models.CASCADE,
+        related_name='service_types',
+        help_text='Company this service type belongs to'
+    )
+    name = models.CharField(max_length=100)  # e.g., Standard, Express
+    code = models.CharField(max_length=50)
     base_rate = models.DecimalField(max_digits=10, decimal_places=2)
     rate_per_kg = models.DecimalField(max_digits=10, decimal_places=2)
     estimated_days_min = models.PositiveIntegerField()
@@ -33,9 +40,14 @@ class ServiceType(models.Model):
     
     class Meta:
         db_table = 'service_types'
+        # Unique name and code per company
+        unique_together = [
+            ['company', 'name'],
+            ['company', 'code'],
+        ]
     
     def __str__(self):
-        return self.name
+        return f"{self.company.name} - {self.name}"
 
 
 class Shipment(models.Model):
@@ -51,12 +63,16 @@ class Shipment(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
+    
+    # Company relationship
+    company = models.ForeignKey(
+        'accounts.Company',
+        on_delete=models.CASCADE,
         related_name='shipments',
-        help_text='The customer (e-commerce company) who created this shipment'
+        help_text='The company that created this shipment'
     )
+    
+    # Carrier assignment
     carrier = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.SET_NULL, 
@@ -65,12 +81,24 @@ class Shipment(models.Model):
         related_name='carrier_shipments',
         help_text='Assigned carrier for this shipment'
     )
+    
     tracking_number = models.CharField(max_length=50, unique=True, blank=True)
     reference_number = models.CharField(max_length=100, blank=True, help_text='Customer order ID')
     
-    # Addresses
-    sender_address = models.ForeignKey(Address, on_delete=models.PROTECT, related_name='sent_shipments')
-    receiver_address = models.ForeignKey(Address, on_delete=models.PROTECT, related_name='received_shipments')
+    # Addresses - sender is nullable (can use company default address)
+    sender_address = models.ForeignKey(
+        Address, 
+        on_delete=models.PROTECT, 
+        related_name='sent_shipments',
+        null=True,
+        blank=True,
+        help_text='Sender address. If null, company address may be used.'
+    )
+    receiver_address = models.ForeignKey(
+        Address, 
+        on_delete=models.PROTECT, 
+        related_name='received_shipments'
+    )
     
     # Package details
     weight = models.DecimalField(max_digits=10, decimal_places=2, help_text='Weight in kg')
@@ -137,29 +165,43 @@ class TrackingEvent(models.Model):
         return f"{self.shipment.tracking_number} - {self.status}"
 
 
+def generate_webhook_secret():
+    """Generate a simple secret for webhook validation."""
+    return secrets.token_hex(16)
+
+
 class Webhook(models.Model):
-    """Webhook registration for status updates."""
-    EVENT_CHOICES = [
-        ('shipment.status_changed', 'Shipment Status Changed'),
-        ('shipment.created', 'Shipment Created'),
-        ('shipment.delivered', 'Shipment Delivered'),
-    ]
-    
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.CASCADE, 
+    """
+    Webhook registration for shipment status updates.
+    When a shipment status changes, a POST request is sent to the URL
+    with the new status and the secret for validation.
+    """
+    company = models.ForeignKey(
+        'accounts.Company',
+        on_delete=models.CASCADE,
         related_name='webhooks',
-        help_text='The customer (e-commerce company) who registered this webhook'
+        help_text='The company that registered this webhook'
     )
-    url = models.URLField()
-    event = models.CharField(max_length=50, choices=EVENT_CHOICES)
+    url = models.URLField(help_text='URL to receive webhook POST requests')
+    secret = models.CharField(
+        max_length=64, 
+        default=generate_webhook_secret,
+        help_text='Secret sent with each webhook for validation'
+    )
     is_active = models.BooleanField(default=True)
-    secret = models.CharField(max_length=100, blank=True, help_text='Secret for webhook signature')
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
         db_table = 'webhooks'
-        unique_together = ['user', 'url', 'event']
+        # One webhook URL per company
+        unique_together = ['company', 'url']
+    
+    def regenerate_secret(self):
+        """Generate a new secret for this webhook."""
+        self.secret = generate_webhook_secret()
+        self.save(update_fields=['secret', 'updated_at'])
+        return self.secret
     
     def __str__(self):
-        return f"{self.user.username} - {self.event}"
+        return f"{self.company.name} - {self.url}"

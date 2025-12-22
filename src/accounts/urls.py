@@ -1,25 +1,60 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView, TokenObtainPairView
 
+from .serializers import CustomTokenObtainPairSerializer
 from .views import (
-    UserRegistrationView, 
     UserProfileView,
-    PendingApprovalsListView,
-    UserApprovalView,
-    ApprovedUsersListView,
+    # Superuser endpoints
+    SuperuserCompanyListCreateView,
+    SuperuserCompanyDetailView,
+    SuperuserCompanyRegenerateTokenView,
+    SuperuserAdminUserCreateView,
+    SuperuserUserListView,
+    SuperuserUserDetailView,
+    # Admin endpoints
+    CompanyListCreateView,
+    CompanyDetailView,
+    CompanyRegenerateTokenView,
+    UserListCreateView,
+    UserDetailView,
+    CarrierListView,
 )
 
+
+# Custom JWT view that returns full user data
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+
+
 urlpatterns = [
-    # Public endpoints
-    path('register/', UserRegistrationView.as_view(), name='register'),
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    # JWT Authentication (for carriers/admins) - Returns full user data
+    path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
-    # Authenticated user endpoints
+    # Authenticated user profile
     path('profile/', UserProfileView.as_view(), name='profile'),
     
-    # Admin endpoints for user management
-    path('admin/pending-approvals/', PendingApprovalsListView.as_view(), name='pending-approvals'),
-    path('admin/users/<int:user_id>/approve/', UserApprovalView.as_view(), name='user-approval'),
-    path('admin/approved-users/', ApprovedUsersListView.as_view(), name='approved-users'),
+    # ─────────────────────────────────────────────────────────────────
+    # SUPERUSER ENDPOINTS - Critical Operations
+    # ─────────────────────────────────────────────────────────────────
+    path('superuser/companies/', SuperuserCompanyListCreateView.as_view(), name='superuser-company-list-create'),
+    path('superuser/companies/<int:pk>/', SuperuserCompanyDetailView.as_view(), name='superuser-company-detail'),
+    path('superuser/companies/<int:pk>/regenerate-token/', SuperuserCompanyRegenerateTokenView.as_view(), name='superuser-company-regenerate-token'),
+    path('superuser/admins/', SuperuserAdminUserCreateView.as_view(), name='superuser-admin-create'),
+    path('superuser/users/', SuperuserUserListView.as_view(), name='superuser-user-list'),
+    path('superuser/users/<int:pk>/', SuperuserUserDetailView.as_view(), name='superuser-user-detail'),
+    
+    # ─────────────────────────────────────────────────────────────────
+    # ADMIN ENDPOINTS - Company Management (Read + regenerate token)
+    # ─────────────────────────────────────────────────────────────────
+    path('admin/companies/', CompanyListCreateView.as_view(), name='company-list'),
+    path('admin/companies/<int:pk>/', CompanyDetailView.as_view(), name='company-detail'),
+    path('admin/companies/<int:pk>/regenerate-token/', CompanyRegenerateTokenView.as_view(), name='company-regenerate-token'),
+    
+    # ─────────────────────────────────────────────────────────────────
+    # ADMIN ENDPOINTS - Carrier Management (CRUD carriers only)
+    # ─────────────────────────────────────────────────────────────────
+    path('admin/users/', UserListCreateView.as_view(), name='user-list-create'),
+    path('admin/users/<int:pk>/', UserDetailView.as_view(), name='user-detail'),
+    path('admin/carriers/', CarrierListView.as_view(), name='carrier-list'),
 ]

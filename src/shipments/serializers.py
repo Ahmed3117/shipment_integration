@@ -2,6 +2,14 @@ from rest_framework import serializers
 from datetime import datetime, timedelta
 from decimal import Decimal
 from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook
+from accounts.models import Company
+
+
+class CompanySerializer(serializers.ModelSerializer):
+    """Minimal serializer for Company information in responses."""
+    class Meta:
+        model = Company
+        fields = ['id', 'name', 'email', 'phone', 'address']
 
 
 class AddressSerializer(serializers.ModelSerializer):
@@ -18,8 +26,28 @@ class AddressSerializer(serializers.ModelSerializer):
     
     def validate_zip_code(self, value):
         if not value or len(value) < 3:
-            raise serializers.ValidationError('Zip code not found.')
+            raise serializers.ValidationError('Invalid zip code. Must have at least 3 characters.')
         return value
+    
+    def validate_city(self, value):
+        if not value or len(value.strip()) < 2:
+            raise serializers.ValidationError('Invalid city name.')
+        return value.strip()
+    
+    def validate_state(self, value):
+        if not value or len(value.strip()) < 2:
+            raise serializers.ValidationError('Invalid state name.')
+        return value.strip()
+    
+    def validate_street(self, value):
+        if not value or len(value.strip()) < 5:
+            raise serializers.ValidationError('Invalid street address. Must have at least 5 characters.')
+        return value.strip()
+    
+    def validate_name(self, value):
+        if not value or len(value.strip()) < 2:
+            raise serializers.ValidationError('Invalid name. Must have at least 2 characters.')
+        return value.strip()
 
 
 class ServiceTypeSerializer(serializers.ModelSerializer):
@@ -31,9 +59,11 @@ class ServiceTypeSerializer(serializers.ModelSerializer):
 
 class ServiceTypeAdminSerializer(serializers.ModelSerializer):
     """Serializer for admin service type management (full CRUD)."""
+    company_id = serializers.IntegerField(required=True, write_only=True)
+    
     class Meta:
         model = ServiceType
-        fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max', 'is_active']
+        fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max', 'is_active', 'company_id']
     
     def validate_code(self, value):
         """Ensure code is lowercase and alphanumeric with underscores only."""
@@ -41,6 +71,14 @@ class ServiceTypeAdminSerializer(serializers.ModelSerializer):
         if not re.match(r'^[a-z0-9_]+$', value.lower()):
             raise serializers.ValidationError('Code must contain only lowercase letters, numbers, and underscores.')
         return value.lower()
+    
+    def validate_company_id(self, value):
+        """Validate that company exists."""
+        try:
+            Company.objects.get(id=value)
+        except Company.DoesNotExist:
+            raise serializers.ValidationError('Company not found.')
+        return value
     
     def validate(self, data):
         """Ensure min days <= max days."""
@@ -51,6 +89,17 @@ class ServiceTypeAdminSerializer(serializers.ModelSerializer):
                 'estimated_days_min': 'Minimum days cannot be greater than maximum days.'
             })
         return data
+    
+    def create(self, validated_data):
+        company_id = validated_data.pop('company_id')
+        validated_data['company'] = Company.objects.get(id=company_id)
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        company_id = validated_data.pop('company_id', None)
+        if company_id is not None:
+            validated_data['company'] = Company.objects.get(id=company_id)
+        return super().update(instance, validated_data)
 
 
 # --- Rate Calculation Serializers ---
@@ -82,7 +131,7 @@ class RateOptionSerializer(serializers.Serializer):
 
 # --- Shipment Serializers ---
 class ShipmentCreateSerializer(serializers.ModelSerializer):
-    sender_address = AddressSerializer()
+    sender_address = AddressSerializer(required=False, allow_null=True)
     receiver_address = AddressSerializer()
     
     class Meta:
@@ -108,10 +157,13 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        sender_data = validated_data.pop('sender_address')
+        sender_data = validated_data.pop('sender_address', None)
         receiver_data = validated_data.pop('receiver_address')
         
-        sender = Address.objects.create(**sender_data)
+        sender = None
+        if sender_data:
+            sender = Address.objects.create(**sender_data)
+        
         receiver = Address.objects.create(**receiver_data)
         
         service_type = validated_data['service_type']
@@ -135,24 +187,31 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         )
         
         # Create initial tracking event
+        location = f"{sender.city}, {sender.state}" if sender else None
         TrackingEvent.objects.create(
             shipment=shipment,
             status='created',
             description='Shipment created successfully.',
-            location=f"{sender.city}, {sender.state}"
+            location=location
         )
         
         return shipment
 
 
 class ShipmentListSerializer(serializers.ModelSerializer):
+    sender_address = AddressSerializer(read_only=True)
+    receiver_address = AddressSerializer(read_only=True)
     service_type = ServiceTypeSerializer(read_only=True)
+    company = CompanySerializer(read_only=True)
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status',
-            'service_type', 'estimated_cost', 'created_at'
+            'id', 'tracking_number', 'reference_number', 'status', 'company',
+            'sender_address', 'receiver_address',
+            'weight', 'length', 'width', 'height', 'content_description',
+            'service_type', 'estimated_cost', 'estimated_delivery_date',
+            'label_url', 'created_at', 'updated_at'
         ]
 
 
@@ -160,15 +219,16 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
     sender_address = AddressSerializer(read_only=True)
     receiver_address = AddressSerializer(read_only=True)
     service_type = ServiceTypeSerializer(read_only=True)
+    company = CompanySerializer(read_only=True)
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number',
+            'id', 'tracking_number', 'reference_number', 'status', 'company',
             'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
-            'status', 'label_url', 'created_at', 'updated_at'
+            'label_url', 'created_at', 'updated_at'
         ]
 
 
@@ -192,11 +252,8 @@ class TrackingResponseSerializer(serializers.Serializer):
 class WebhookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'event', 'is_active', 'secret', 'created_at']
-        read_only_fields = ['id', 'created_at']
-        extra_kwargs = {
-            'secret': {'write_only': True, 'required': False},
-        }
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at']
+        read_only_fields = ['id', 'secret', 'created_at']
     
     def validate_url(self, value):
         if not value.startswith('https://'):
@@ -204,19 +261,25 @@ class WebhookSerializer(serializers.ModelSerializer):
         return value
 
 
-# --- Address Validation Serializer ---
-class AddressValidationSerializer(serializers.Serializer):
-    street = serializers.CharField(max_length=500, required=False, allow_blank=True)
-    city = serializers.CharField(max_length=100)
-    state = serializers.CharField(max_length=100)
-    zip_code = serializers.CharField(max_length=20)
-    country = serializers.CharField(max_length=100, default='USA')
+class WebhookCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating webhooks (secret is auto-generated)."""
+    class Meta:
+        model = Webhook
+        fields = ['id', 'url', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+    
+    def validate_url(self, value):
+        if not value.startswith('https://'):
+            raise serializers.ValidationError('Webhook URL must use HTTPS.')
+        return value
 
 
-class AddressValidationResponseSerializer(serializers.Serializer):
-    is_valid = serializers.BooleanField()
-    message = serializers.CharField()
-    suggested_address = AddressSerializer(required=False, allow_null=True)
+class WebhookDetailSerializer(serializers.ModelSerializer):
+    """Serializer showing webhook with secret (only on creation)."""
+    class Meta:
+        model = Webhook
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at']
+        read_only_fields = fields
 
 
 # --- Status Update Serializer ---
@@ -237,7 +300,7 @@ class CarrierShipmentListSerializer(serializers.ModelSerializer):
     sender_address = AddressSerializer(read_only=True)
     receiver_address = AddressSerializer(read_only=True)
     service_type = ServiceTypeSerializer(read_only=True)
-    customer_name = serializers.CharField(source='user.company_name', read_only=True)
+    company_name = serializers.CharField(source='company.name', read_only=True)
     
     class Meta:
         model = Shipment
@@ -246,7 +309,7 @@ class CarrierShipmentListSerializer(serializers.ModelSerializer):
             'sender_address', 'receiver_address',
             'weight', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
-            'customer_name', 'created_at'
+            'company_name', 'created_at'
         ]
 
 
