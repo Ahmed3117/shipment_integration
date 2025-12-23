@@ -59,6 +59,7 @@ class User(AbstractUser):
     ]
     
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='admin')
+    name = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=20, blank=True)
     
     # Company relationship - users belong to a company (except superusers)

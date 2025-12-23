@@ -24,6 +24,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'id': user.id,
             'username': user.username,
             'email': user.email,
+            'name': user.name,
             'user_type': user.user_type,
             'phone': user.phone,
             'is_active': user.is_active,
@@ -105,7 +106,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'password_confirm', 'company_id', 'phone']
+        fields = ['id', 'username', 'email', 'name', 'password', 'password_confirm', 'company_id', 'phone']
         extra_kwargs = {
             'email': {'required': True},
         }
@@ -146,7 +147,7 @@ class AdminUserRegistrationSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'password_confirm', 'phone', 'is_staff', 'company_id']
+        fields = ['id', 'username', 'email', 'name', 'password', 'password_confirm', 'phone', 'is_staff', 'company_id']
         extra_kwargs = {
             'email': {'required': True},
         }
@@ -183,7 +184,7 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'user_type', 'company', 'phone', 
+        fields = ['id', 'username', 'email', 'name', 'user_type', 'company', 'phone', 
                   'is_active', 'is_staff', 'is_superuser', 'date_joined', 'last_login']
         read_only_fields = ['id', 'username', 'user_type', 'is_active', 'is_staff', 
                            'is_superuser', 'date_joined', 'last_login']
@@ -195,7 +196,7 @@ class UserListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'user_type', 'company_name', 'phone', 'is_active', 'date_joined']
+        fields = ['id', 'username', 'email', 'name', 'user_type', 'company_name', 'phone', 'is_active', 'date_joined']
         read_only_fields = fields
 
 
@@ -205,5 +206,42 @@ class CarrierSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'company_name', 'phone', 'is_active']
+        fields = ['id', 'username', 'email', 'name', 'company_name', 'phone', 'is_active']
         read_only_fields = fields
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating user details.
+    Handles password hashing correctly if password is provided.
+    """
+    password = serializers.CharField(write_only=True, required=False, validators=[validate_password])
+    company_id = serializers.IntegerField(required=False, allow_null=True)
+    
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'name', 'phone', 'password', 'company_id', 'is_active']
+    
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        company_id = validated_data.pop('company_id', None)
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        # Handle password update
+        if password:
+            instance.set_password(password)
+            
+        # Handle company update
+        if company_id is not None:
+            # Check if company exists if it was passed
+            try:
+                company = Company.objects.get(id=company_id)
+                instance.company = company
+            except Company.DoesNotExist:
+                raise serializers.ValidationError({'company_id': 'Company not found.'})
+        
+        instance.save()
+        return instance

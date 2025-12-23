@@ -17,6 +17,7 @@ from .serializers import (
     CompanyDetailSerializer,
     CompanyTokenSerializer,
     CompanyListWithTokenSerializer,
+    UserUpdateSerializer,
 )
 from shipments.permissions import IsAdmin, IsSuperuser
 
@@ -145,6 +146,11 @@ class SuperuserUserDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UserSerializer
     permission_classes = [IsSuperuser]
     
+    def get_serializer_class(self):
+        if self.request.method in ['PATCH', 'PUT']:
+            return UserUpdateSerializer
+        return UserSerializer
+    
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance == request.user:
@@ -246,14 +252,16 @@ class UserListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         user = self.request.user
         queryset = User.objects.filter(user_type='carrier')
-        if user.is_superuser:
-            # Superuser can see all carriers
-            pass
-        else:
+        
+        # Admin can only see carriers in their company
+        if not user.is_superuser:
             queryset = queryset.filter(company_id=user.company_id)
-        company_id = self.request.query_params.get('company_id')
-        if company_id:
-            queryset = queryset.filter(company_id=company_id)
+            
+        # Support filtering by company ID
+        company = self.request.query_params.get('company')
+        if company:
+            queryset = queryset.filter(company_id=company)
+            
         return queryset.order_by('-date_joined')
     
     def create(self, request, *args, **kwargs):
@@ -278,6 +286,11 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     serializer_class = UserSerializer
     permission_classes = [IsAdmin]
+    
+    def get_serializer_class(self):
+        if self.request.method in ['PATCH', 'PUT']:
+            return UserUpdateSerializer
+        return UserSerializer
     
     def get_queryset(self):
         user = self.request.user
@@ -305,13 +318,16 @@ class CarrierListView(generics.ListAPIView):
     def get_queryset(self):
         user = self.request.user
         queryset = User.objects.filter(user_type='carrier')
-        if user.is_superuser:
-            pass
-        else:
+        
+        # Admin can only see carriers in their company
+        if not user.is_superuser:
             queryset = queryset.filter(company_id=user.company_id)
-        company_id = self.request.query_params.get('company_id')
-        if company_id:
-            queryset = queryset.filter(company_id=company_id)
+            
+        # Support filtering by company ID
+        company = self.request.query_params.get('company')
+        if company:
+            queryset = queryset.filter(company_id=company)
+            
         return queryset.order_by('username')
 
 
@@ -321,8 +337,31 @@ class CarrierListView(generics.ListAPIView):
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
     """Retrieve or update current user profile."""
-    serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+    
+    def get_serializer_class(self):
+        if self.request.method in ['PATCH', 'PUT']:
+            return UserUpdateSerializer
+        return UserSerializer
+    
+    def update(self, request, *args, **kwargs):
+        # Prevent non-superusers from updating their own company
+        if not request.user.is_superuser:
+            if 'company_id' in request.data:
+                # We could either ignore it or return an error. 
+                # The requirement says "except the company", so let's ignore or error.
+                # I'll just remove it from the data to be safe.
+                data = request.data.copy()
+                data.pop('company_id', None)
+                request._full_data = data # This is a bit hacky for DRF, let's use a cleaner way
+        
+        return super().update(request, *args, **kwargs)
+    
+    def perform_update(self, serializer):
+        # If not superuser, remove company_id from validated_data
+        if not self.request.user.is_superuser:
+            serializer.validated_data.pop('company_id', None)
+        serializer.save()
     
     def get_object(self):
         return self.request.user
