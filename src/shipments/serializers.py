@@ -59,11 +59,16 @@ class ServiceTypeSerializer(serializers.ModelSerializer):
 
 class ServiceTypeAdminSerializer(serializers.ModelSerializer):
     """Serializer for admin service type management (full CRUD)."""
-    company_id = serializers.IntegerField(required=True, write_only=True)
+    company_id = serializers.IntegerField(required=False, write_only=True)
+    company = CompanySerializer(read_only=True)
     
     class Meta:
         model = ServiceType
-        fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max', 'is_active', 'company_id']
+        fields = [
+            'id', 'name', 'code', 'base_rate', 'rate_per_kg', 
+            'estimated_days_min', 'estimated_days_max', 'is_active', 
+            'company_id', 'company'
+        ]
     
     def validate_code(self, value):
         """Ensure code is lowercase and alphanumeric with underscores only."""
@@ -74,6 +79,8 @@ class ServiceTypeAdminSerializer(serializers.ModelSerializer):
     
     def validate_company_id(self, value):
         """Validate that company exists."""
+        if value is None:
+            return None
         try:
             Company.objects.get(id=value)
         except Company.DoesNotExist:
@@ -81,18 +88,61 @@ class ServiceTypeAdminSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, data):
-        """Ensure min days <= max days."""
+        """Ensure min days <= max days and handle company permission."""
         min_days = data.get('estimated_days_min')
         max_days = data.get('estimated_days_max')
         if min_days and max_days and min_days > max_days:
             raise serializers.ValidationError({
                 'estimated_days_min': 'Minimum days cannot be greater than maximum days.'
             })
+        
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        
+        if not user:
+            return data
+
+        company_id = data.get('company_id')
+        
+        # If admin, ensure they only set their own company
+        if not user.is_superuser:
+            if company_id and company_id != user.company_id:
+                raise serializers.ValidationError({'company_id': 'You can only manage service types for your own company.'})
+            if not company_id:
+                company_id = user.company_id
+                data['company_id'] = company_id
+        else:
+            # Superuser must provide company_id on creation
+            if request.method == 'POST' and not company_id:
+                raise serializers.ValidationError({'company_id': 'Company ID is required for superusers.'})
+
+        # Unique constraint validation before DB hit
+        name = data.get('name')
+        code = data.get('code')
+        
+        # Check if we're updating or creating
+        instance = self.instance
+        
+        if name and company_id:
+            qs = ServiceType.objects.filter(company_id=company_id, name=name)
+            if instance:
+                qs = qs.exclude(id=instance.id)
+            if qs.exists():
+                raise serializers.ValidationError({'name': f'A service type with name "{name}" already exists for this company.'})
+                
+        if code and company_id:
+            qs = ServiceType.objects.filter(company_id=company_id, code=code)
+            if instance:
+                qs = qs.exclude(id=instance.id)
+            if qs.exists():
+                raise serializers.ValidationError({'code': f'A service type with code "{code}" already exists for this company.'})
+
         return data
     
     def create(self, validated_data):
-        company_id = validated_data.pop('company_id')
-        validated_data['company'] = Company.objects.get(id=company_id)
+        company_id = validated_data.pop('company_id', None)
+        if company_id:
+            validated_data['company'] = Company.objects.get(id=company_id)
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
@@ -134,13 +184,25 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
     sender_address = AddressSerializer(required=False, allow_null=True)
     receiver_address = AddressSerializer()
     
+    company = serializers.SerializerMethodField()
+    carrier = serializers.SerializerMethodField()
+    
     class Meta:
         model = Shipment
         fields = [
-            'reference_number', 'sender_address', 'receiver_address',
+            'id', 'reference_number', 'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
-            'service_type'
+            'service_type', 'company', 'carrier'
         ]
+        read_only_fields = ['id', 'company', 'carrier']
+
+    def get_company(self, obj):
+        from accounts.serializers import CompanySerializer
+        return CompanySerializer(obj.company).data if obj.company else None
+
+    def get_carrier(self, obj):
+        from accounts.serializers import CarrierSerializer
+        return CarrierSerializer(obj.carrier).data if obj.carrier else None
     
     def validate_weight(self, value):
         if value <= 0:
@@ -203,16 +265,21 @@ class ShipmentListSerializer(serializers.ModelSerializer):
     receiver_address = AddressSerializer(read_only=True)
     service_type = ServiceTypeSerializer(read_only=True)
     company = CompanySerializer(read_only=True)
+    carrier = serializers.SerializerMethodField()
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status', 'company',
+            'id', 'tracking_number', 'reference_number', 'status', 'company', 'carrier',
             'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
             'label_url', 'created_at', 'updated_at'
         ]
+
+    def get_carrier(self, obj):
+        from accounts.serializers import CarrierSerializer
+        return CarrierSerializer(obj.carrier).data if obj.carrier else None
 
 
 class ShipmentDetailSerializer(serializers.ModelSerializer):
@@ -220,16 +287,21 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
     receiver_address = AddressSerializer(read_only=True)
     service_type = ServiceTypeSerializer(read_only=True)
     company = CompanySerializer(read_only=True)
+    carrier = serializers.SerializerMethodField()
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status', 'company',
+            'id', 'tracking_number', 'reference_number', 'status', 'company', 'carrier',
             'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
             'label_url', 'created_at', 'updated_at'
         ]
+
+    def get_carrier(self, obj):
+        from accounts.serializers import CarrierSerializer
+        return CarrierSerializer(obj.carrier).data if obj.carrier else None
 
 
 # --- Tracking Serializers ---
@@ -313,24 +385,6 @@ class CarrierShipmentListSerializer(serializers.ModelSerializer):
         ]
 
 
-class CarrierStatusUpdateSerializer(serializers.Serializer):
-    """Serializer for carrier to update shipment status by scanning."""
-    CARRIER_STATUS_CHOICES = [
-        'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'returned'
-    ]
-    
-    reference_number = serializers.CharField(max_length=100, required=False)
-    tracking_number = serializers.CharField(max_length=50, required=False)
-    status = serializers.ChoiceField(choices=CARRIER_STATUS_CHOICES)
-    description = serializers.CharField(required=False, allow_blank=True)
-    location = serializers.CharField(required=False, allow_blank=True, allow_null=True, default=None)
-    
-    def validate(self, attrs):
-        if not attrs.get('reference_number') and not attrs.get('tracking_number'):
-            raise serializers.ValidationError(
-                'Either reference_number or tracking_number must be provided.'
-            )
-        return attrs
 
 
 class TrackingEventDetailSerializer(serializers.ModelSerializer):
@@ -342,9 +396,14 @@ class TrackingEventDetailSerializer(serializers.ModelSerializer):
         fields = ['id', 'status', 'description', 'location', 'created_by_name', 'timestamp']
 
 
-class AssignCarrierSerializer(serializers.Serializer):
-    """Serializer for assigning a carrier to a shipment."""
+class BulkAssignCarrierSerializer(serializers.Serializer):
+    """Serializer for assigning a carrier to multiple shipments in bulk."""
     carrier_id = serializers.IntegerField()
+    shipments = serializers.ListField(
+        child=serializers.IntegerField(),
+        min_length=1,
+        help_text="List of shipment IDs to assign."
+    )
     
     def validate_carrier_id(self, value):
         from django.contrib.auth import get_user_model

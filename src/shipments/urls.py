@@ -1,9 +1,7 @@
-from django.urls import path
+from django.urls import path, include
 
 from .views import (
     ServiceTypeListView,
-    AdminServiceTypeListCreateView,
-    AdminServiceTypeDetailView,
     CalculateRatesView,
     ShipmentListCreateView,
     ShipmentDetailView,
@@ -12,22 +10,28 @@ from .views import (
     LabelDownloadView,
     ShipmentStatusUpdateView,
     TrackShipmentView,
-    WebhookListCreateView,
-    WebhookDetailView,
+    AdminWebhookViewSet,
     # Carrier views
     CarrierShipmentListView,
     CarrierShipmentDetailView,
     CarrierStatusUpdateByScanView,
-    AssignCarrierView,
+    CarrierShipmentStatusUpdateView,
+    AdminShipmentViewSet,
+    AdminServiceTypeViewSet,
 )
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register(r'admin/service-types', AdminServiceTypeViewSet, basename='admin-service-type')
+router.register(r'admin/webhooks', AdminWebhookViewSet, basename='admin-webhook')
+router.register(r'admin', AdminShipmentViewSet, basename='admin-shipment')
 
 urlpatterns = [
     # Service Types (Public)
     path('service-types/', ServiceTypeListView.as_view(), name='service-list'),
     
-    # Service Types (Admin CRUD)
-    path('admin/service-types/', AdminServiceTypeListCreateView.as_view(), name='admin-service-list-create'),
-    path('admin/service-types/<int:pk>/', AdminServiceTypeDetailView.as_view(), name='admin-service-detail'),
+    # Admin CRUD via Routers
+    path('', include(router.urls)),
     
     # Rate Calculation
     path('rates/calculate/', CalculateRatesView.as_view(), name='calculate-rates'),
@@ -35,14 +39,13 @@ urlpatterns = [
     # Tracking (Public)
     path('track/<str:tracking_number>/', TrackShipmentView.as_view(), name='track-shipment'),
     
-    # Webhooks (Company Token Auth) - MUST be before the catch-all <str:tracking_number>
-    path('webhooks/', WebhookListCreateView.as_view(), name='webhook-list-create'),
-    path('webhooks/<int:pk>/', WebhookDetailView.as_view(), name='webhook-detail'),
+    # Webhooks (moved to Admin CRUD)
     
     # Carrier Endpoints (JWT Auth) - MUST be before the catch-all <str:tracking_number>
     path('carrier/', CarrierShipmentListView.as_view(), name='carrier-shipment-list'),
-    path('carrier/scan/', CarrierStatusUpdateByScanView.as_view(), name='carrier-scan-update'),
+    path('carrier/<str:tracking_number>/scan/', CarrierStatusUpdateByScanView.as_view(), name='carrier-scan-pickup'),
     path('carrier/<str:tracking_number>/', CarrierShipmentDetailView.as_view(), name='carrier-shipment-detail'),
+    path('carrier/<str:tracking_number>/status/', CarrierShipmentStatusUpdateView.as_view(), name='carrier-status-update'),
     
     # Shipments (Company Token Auth) - catch-all patterns MUST be last
     path('', ShipmentListCreateView.as_view(), name='shipment-list-create'),
@@ -51,5 +54,4 @@ urlpatterns = [
     path('<str:tracking_number>/label/', ShipmentLabelView.as_view(), name='shipment-label'),
     path('<str:shipment_id>/label/download/', LabelDownloadView.as_view(), name='shipment-label-download'),
     path('<str:tracking_number>/status/', ShipmentStatusUpdateView.as_view(), name='shipment-status-update'),
-    path('<str:tracking_number>/assign/', AssignCarrierView.as_view(), name='shipment-assign-carrier'),
 ]

@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from django.db import models
-from rest_framework import generics, status
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
@@ -22,8 +23,7 @@ from .serializers import (
     WebhookDetailSerializer,
     ShipmentStatusUpdateSerializer,
     CarrierShipmentListSerializer,
-    CarrierStatusUpdateSerializer,
-    AssignCarrierSerializer,
+    BulkAssignCarrierSerializer,
 )
 from .services import update_shipment_status, send_webhook_notification
 from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin, IsCompany, IsCompanyOrAdmin
@@ -32,45 +32,47 @@ from accounts.authentication import CompanyUser
 
 # --- Service Types (Public) ---
 class ServiceTypeListView(generics.ListAPIView):
-    """List all active shipping service types (public endpoint)."""
-    queryset = ServiceType.objects.filter(is_active=True)
+    """
+    List active shipping service types for the authenticated company.
+    """
     serializer_class = ServiceTypeSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsCompany]
+    
+    def get_queryset(self):
+        # Strict filtering: only return services for the authenticated company
+        return ServiceType.objects.filter(
+            is_active=True,
+            company=self.request.user.company
+        ).order_by('name')
 
 
 # --- Service Types (Admin CRUD) ---
-class AdminServiceTypeListCreateView(generics.ListCreateAPIView):
+class AdminServiceTypeViewSet(viewsets.ModelViewSet):
     """
-    Admin endpoint to list all service types (including inactive) and create new ones.
-    
-    GET: List all service types
-    POST: Create a new service type
+    Admin ViewSet for full CRUD on service types.
+    Superuser: Full access.
+    Admin: Access only to their company's service types.
     """
-    queryset = ServiceType.objects.all()
     serializer_class = ServiceTypeAdminSerializer
     permission_classes = [IsAdmin]
     
     def get_queryset(self):
+        user = self.request.user
         queryset = ServiceType.objects.all()
+        
+        if not user.is_superuser:
+            if hasattr(user, 'company') and user.company:
+                queryset = queryset.filter(company=user.company)
+            else:
+                return ServiceType.objects.none()
+        
         # Optional filter by is_active
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
         return queryset.order_by('name')
 
-
-class AdminServiceTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """
-    Admin endpoint to get, update, or delete a service type.
-    
-    GET: Get service type details
-    PUT/PATCH: Update service type
-    DELETE: Delete service type (only if not used in any shipment)
-    """
-    queryset = ServiceType.objects.all()
-    serializer_class = ServiceTypeAdminSerializer
-    permission_classes = [IsAdmin]
-    
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         # Check if service type is in use
@@ -98,7 +100,22 @@ class CalculateRatesView(generics.GenericAPIView):
         data = serializer.validated_data
         weight = data['weight']
         
+        # Determine company to filter services
+        user = request.user
+        from accounts.authentication import CompanyUser
+        company = None
+        if isinstance(user, CompanyUser):
+            company = user.company
+        elif user.is_authenticated and not user.is_superuser:
+            company = getattr(user, 'company', None)
+        
         services = ServiceType.objects.filter(is_active=True)
+        if company:
+            services = services.filter(company=company)
+        elif not user.is_superuser:
+            # If not superuser and no company found, no services available
+            return Response({'error': 'No services available for your account.'}, status=status.HTTP_403_FORBIDDEN)
+            
         rates = []
         
         for service in services:
@@ -157,22 +174,15 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
         queryset = Shipment.objects.all()
         # If Company token auth
         if isinstance(user, CompanyUser):
-            return queryset.filter(company=user.company).order_by('-created_at')
-
-        # If superuser, they can see everything
-        if user.is_superuser:
-            return queryset.order_by('-created_at')
-
-        # Regular Admin/Staff
-        if hasattr(user, 'company') and user.company:
+            queryset = queryset.filter(company=user.company)
+        elif user.is_superuser:
+            pass # Superuser sees all
+        elif hasattr(user, 'company') and user.company:
             queryset = queryset.filter(company=user.company)
         else:
-            # User has no company and is not superuser
             return Shipment.objects.none()
 
-        return queryset.order_by('-created_at')
-
-        # Filter by date range
+        # Filter by query params
         start_date = self.request.query_params.get('start_date')
         end_date = self.request.query_params.get('end_date')
         status_filter = self.request.query_params.get('status')
@@ -368,8 +378,8 @@ class LabelDownloadView(generics.GenericAPIView):
         # Here we mock it with a simple text response or a redirect
         from django.http import HttpResponse
         
-        # Check if shipment_id is a UUID (from the label_url) or a tracking_number
-        if len(str(shipment_id)) > 20: # Likely a UUID
+        # Check if shipment_id is a numeric ID or a tracking_number
+        if str(shipment_id).isdigit() and len(str(shipment_id)) < 11:
             shipment = get_object_or_404(Shipment, id=shipment_id)
         else:
             shipment = get_object_or_404(Shipment, tracking_number=shipment_id)
@@ -415,45 +425,58 @@ class TrackShipmentView(generics.GenericAPIView):
         return Response(response_data)
 
 
-# --- Webhooks ---
-class WebhookListCreateView(generics.ListCreateAPIView):
-    """List or create webhooks."""
-    permission_classes = [IsCompany]
-    
-    def get_serializer_class(self):
-        if self.request.method == 'POST':
-            return WebhookCreateSerializer
-        return WebhookSerializer
-    
-    def get_queryset(self):
-        company = self.request.user.company
-        return Webhook.objects.filter(company=company)
-    
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        import secrets
-        company = request.user.company
-        secret = secrets.token_urlsafe(32)
-        webhook = serializer.save(company=company, secret=secret)
-        
-        return Response({
-            'message': 'Webhook registered successfully.',
-            'webhook': WebhookDetailSerializer(webhook).data
-        }, status=status.HTTP_201_CREATED)
-
-
-class WebhookDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """Retrieve, update, or delete a webhook."""
-    serializer_class = WebhookSerializer
-    permission_classes = [IsCompany]
+# --- Webhooks (Admin CRUD) ---
+class AdminWebhookViewSet(viewsets.ModelViewSet):
+    """
+    CRUD for webhooks, accessible by admins and superusers.
+    Admins can only see and manage webhooks for their own company.
+    """
+    permission_classes = [IsAdmin]
     lookup_field = 'pk'
     
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return WebhookCreateSerializer
+        elif self.request.method in ['GET'] and self.detail:
+            return WebhookDetailSerializer
+        return WebhookSerializer
+
     def get_queryset(self):
-        company = self.request.user.company
-        return Webhook.objects.filter(company=company)
-    
+        user = self.request.user
+        if user.is_superuser:
+            return Webhook.objects.all()
+        return Webhook.objects.filter(company=user.company)
+
+    def perform_create(self, serializer):
+        import secrets
+        user = self.request.user
+        
+        # Determine company
+        if user.is_superuser:
+            company_id = self.request.data.get('company_id')
+            if not company_id:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'company_id': 'Company ID is required for superusers.'})
+            from accounts.models import Company
+            try:
+                company = Company.objects.get(id=company_id)
+            except Company.DoesNotExist:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'company_id': 'Invalid company ID.'})
+        else:
+            company = user.company
+            
+        secret = secrets.token_urlsafe(32)
+        serializer.save(company=company, secret=secret)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        # Wrap response data for consistency (optional but following existing style)
+        return Response({
+            'message': 'Webhook registered successfully.',
+            'webhook': response.data
+        }, status=status.HTTP_201_CREATED)
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         self.perform_destroy(instance)
@@ -551,55 +574,24 @@ class CarrierShipmentDetailView(generics.RetrieveAPIView):
         return get_object_or_404(Shipment, tracking_number=tracking_number, carrier=self.request.user)
 
 
-class CarrierStatusUpdateByScanView(generics.GenericAPIView):
+class CarrierShipmentStatusUpdateView(generics.GenericAPIView):
     """
-    Update shipment status by scanning reference_number or tracking_number.
-    This is the primary endpoint for carriers to update status via mobile scanning.
+    Direct endpoint for carriers to update status of an assigned shipment.
     """
-    serializer_class = CarrierStatusUpdateSerializer
+    serializer_class = ShipmentStatusUpdateSerializer
     permission_classes = [IsCarrier]
-    
-    def post(self, request):
+
+    def patch(self, request, tracking_number):
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, carrier=request.user)
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
-        data = serializer.validated_data
-        reference_number = data.get('reference_number')
-        tracking_number = data.get('tracking_number')
-        new_status = data['status']
-        description = data.get('description', '')
-        location = data.get('location', '')
-        
-        # Find shipment by reference_number or tracking_number
-        shipment = None
-        if reference_number:
-            shipment = Shipment.objects.filter(
-                reference_number=reference_number,
-                carrier=request.user
-            ).first()
-        elif tracking_number:
-            shipment = Shipment.objects.filter(
-                tracking_number=tracking_number,
-                carrier=request.user
-            ).first()
-        
-        if not shipment:
-            return Response({
-                'error': 'Shipment not found or not assigned to you.'
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Validate status transition
-        if shipment.status == 'cancelled':
-            return Response({
-                'error': 'Cannot update status of a cancelled shipment.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        if shipment.status == 'delivered' and new_status != 'returned':
-            return Response({
-                'error': 'Delivered shipment can only be changed to returned.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Update status and send webhooks, recording the carrier who made the update
+
+        new_status = serializer.validated_data['status']
+        description = serializer.validated_data.get('description', '')
+        location = serializer.validated_data.get('location', '')
+
+        # Use the existing service log/update status
         update_shipment_status(
             shipment=shipment,
             new_status=new_status,
@@ -607,47 +599,187 @@ class CarrierStatusUpdateByScanView(generics.GenericAPIView):
             location=location,
             created_by=request.user
         )
-        
+
         return Response({
             'message': f'Shipment status updated to {new_status}.',
-            'shipment_id': str(shipment.id),
             'tracking_number': shipment.tracking_number,
-            'reference_number': shipment.reference_number,
-            'new_status': new_status,
-            'updated_by': request.user.email
+            'status': new_status
         })
 
 
-class AssignCarrierView(generics.GenericAPIView):
+class CarrierStatusUpdateByScanView(generics.GenericAPIView):
     """
-    Assign a carrier to a shipment. Only admin users can assign carriers.
+    Scan a shipment to pick it up (self-assign).
     """
-    serializer_class = AssignCarrierSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsCarrier]
     
     def post(self, request, tracking_number):
-        shipment = get_object_or_404(Shipment, tracking_number=tracking_number)
+        # Find shipment
+        shipment = Shipment.objects.filter(tracking_number=tracking_number).first()
         
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        carrier_id = serializer.validated_data['carrier_id']
-        
-        from accounts.models import User
-        carrier = get_object_or_404(User, pk=carrier_id)
-        
-        if not carrier.is_carrier:
+        if not shipment:
             return Response({
-                'error': 'The specified user is not a carrier.'
+                'error': 'Shipment not found.'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Company check
+        if shipment.company != request.user.company:
+            return Response({
+                'error': 'Shipment belongs to a different company.'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        # 2. Assignment check
+        if shipment.carrier == request.user:
+            return Response({
+                'error': 'Shipment is already assigned to you.'
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        shipment.carrier = carrier
-        shipment.save()
+            
+        if shipment.carrier is not None:
+            return Response({
+                'error': f'Shipment is already assigned to another carrier ({shipment.carrier.username}).'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Perform assignment and update status to picked_up
+        shipment.carrier = request.user
+        shipment.save(update_fields=['carrier'])
+
+        from .utils import update_shipment_status
+        update_shipment_status(
+            shipment=shipment,
+            new_status='picked_up',
+            description='Shipment picked up and assigned to carrier.',
+            created_by=request.user
+        )
         
         return Response({
-            'message': 'Carrier assigned successfully.',
-            'shipment_id': str(shipment.id),
+            'message': 'Shipment picked up successfully.',
+            'shipment_id': shipment.id,
             'tracking_number': shipment.tracking_number,
-            'carrier_id': str(carrier.id),
-            'carrier_email': carrier.email
+            'status': 'picked_up',
+            'assigned_to': request.user.email
+        })
+
+
+class AdminShipmentViewSet(viewsets.ModelViewSet):
+    """
+    Admin ViewSet for full CRUD on shipments.
+    Superuser: Full access.
+    Admin: Access only to their company's shipments.
+    """
+    serializer_class = ShipmentDetailSerializer
+    permission_classes = [IsAdmin]
+    lookup_field = 'id'
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ShipmentCreateSerializer
+        if self.action == 'bulk_assign_carrier':
+            return BulkAssignCarrierSerializer
+        return ShipmentDetailSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = Shipment.objects.all()
+        if user.is_superuser:
+            return queryset.order_by('-created_at')
+        
+        if hasattr(user, 'company') and user.company:
+            return queryset.filter(company=user.company).order_by('-created_at')
+        return Shipment.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        company = None
+        if user.is_superuser:
+            company_id = self.request.data.get('company_id') or self.request.data.get('company')
+            if company_id:
+                from accounts.models import Company
+                company = Company.objects.filter(id=company_id).first()
+        else:
+            company = user.company
+            
+        if not company:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"company": "Valid company is required."})
+        serializer.save(company=company)
+
+    @action(detail=False, methods=['post'], url_path='bulk-assign-carrier')
+    def bulk_assign_carrier(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        carrier_id = serializer.validated_data['carrier_id']
+        shipment_ids = serializer.validated_data['shipments']
+
+        from accounts.models import User
+        try:
+            carrier = User.objects.get(id=carrier_id, user_type='carrier')
+        except User.DoesNotExist:
+            return Response({"error": "Carrier not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Security/Requirement Checks
+        user = request.user
+        if not user.is_superuser:
+            if carrier.company != user.company:
+                return Response({"error": "Carrier does not belong to your company."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Categorize shipments
+        successfully_assigned = []
+        already_assigned = []
+        another_carrier = []
+        notfound_shipments = []
+
+        # We'll use IDs that the user actually provided for notfound check
+        provided_ids = set(shipment_ids)
+        
+        # Get accessible shipments
+        accessible_qs = Shipment.objects.all()
+        if not user.is_superuser:
+            accessible_qs = accessible_qs.filter(company=user.company)
+            
+        found_shipments = accessible_qs.filter(id__in=shipment_ids)
+        found_ids = set(found_shipments.values_list('id', flat=True))
+        
+        # 1. Identify not found
+        missing_ids = provided_ids - found_ids
+        for mid in missing_ids:
+            # We mock the object structure for notfound since it doesn't exist
+            notfound_shipments.append(mid)
+
+        # 2. Categorize found shipments
+        for shipment in found_shipments:
+            # For superuser, carrier and shipment company MUST match
+            if user.is_superuser and shipment.company != carrier.company:
+                notfound_shipments.append(shipment.id)
+                continue
+
+            if shipment.carrier == carrier:
+                already_assigned.append(shipment)
+            elif shipment.carrier is not None:
+                another_carrier.append(shipment)
+            else:
+                # Unassigned or we reassign (decided to reassign only if None in previous logic, 
+                # but user prompt implies we assign if not already assigned or for another)
+                shipment.carrier = carrier
+                shipment.save(update_fields=['carrier'])
+                
+                # Create tracking event
+                TrackingEvent.objects.create(
+                    shipment=shipment,
+                    status=shipment.status,
+                    description=f'Shipment assigned to carrier: {carrier.name or carrier.username}',
+                    created_by=user
+                )
+                successfully_assigned.append(shipment)
+
+        # Serialize everything
+        detail_serializer = ShipmentDetailSerializer
+        
+        return Response({
+            "message": f"Successfully assigned {len(successfully_assigned)} shipments to carrier {carrier.name or carrier.username}.",
+            "carrier_id": carrier_id,
+            "successfully_assigned_shipments": detail_serializer(successfully_assigned, many=True).data,
+            "already_assigned_for_this_caarier": detail_serializer(already_assigned, many=True).data,
+            "assigne_for_another_carrier": detail_serializer(another_carrier, many=True).data,
+            "notfound_shpments": notfound_shipments # Keep as IDs as they don't exist in DB
         })

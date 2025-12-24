@@ -62,7 +62,7 @@ class Shipment(models.Model):
         ('returned', 'Returned'),
     ]
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # id = models.BigAutoField(primary_key=True)  # Default BigAutoField
     
     # Company relationship
     company = models.ForeignKey(
@@ -82,7 +82,7 @@ class Shipment(models.Model):
         help_text='Assigned carrier for this shipment'
     )
     
-    tracking_number = models.CharField(max_length=50, unique=True, blank=True)
+    tracking_number = models.CharField(max_length=20, unique=True, blank=True)
     reference_number = models.CharField(max_length=100, blank=True, help_text='Customer order ID')
     
     # Addresses - sender is nullable (can use company default address)
@@ -133,9 +133,8 @@ class Shipment(models.Model):
     
     def generate_tracking_number(self):
         import random
-        prefix = 'SHP'
-        random_part = ''.join([str(random.randint(0, 9)) for _ in range(12)])
-        return f"{prefix}{random_part}"
+        # 10 numeric digits
+        return ''.join([str(random.randint(0, 9)) for _ in range(10)])
     
     def __str__(self):
         return f"{self.tracking_number} - {self.status}"
