@@ -45,6 +45,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 # COMPANY SERIALIZERS
 # ─────────────────────────────────────────────────────────────────
 
+class SimpleCompanySerializer(serializers.ModelSerializer):
+    """Simple serializer for listing companies."""
+    class Meta:
+        model = Company
+        fields = ['id', 'name']
+
+
 class CompanySerializer(serializers.ModelSerializer):
     """Serializer for Company model (read-only for public use)."""
     class Meta:
@@ -198,6 +205,14 @@ class UserListSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'name', 'user_type', 'company_name', 'phone', 'is_active', 'date_joined']
         read_only_fields = fields
+
+
+
+class SimpleUserSerializer(serializers.ModelSerializer):
+    """Simple serializer for listing users."""
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'name']
 
 
 class CarrierSerializer(serializers.ModelSerializer):

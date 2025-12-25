@@ -18,6 +18,9 @@ from .views import (
     CarrierShipmentStatusUpdateView,
     AdminShipmentViewSet,
     AdminServiceTypeViewSet,
+    SimpleServiceTypeListView,
+    SimpleShipmentListView,
+    SimpleWebhookListView,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -29,6 +32,9 @@ router.register(r'admin', AdminShipmentViewSet, basename='admin-shipment')
 urlpatterns = [
     # Service Types (Public)
     path('service-types/', ServiceTypeListView.as_view(), name='service-list'),
+    
+    # Shipments (Company Token Auth)
+    path('', ShipmentListCreateView.as_view(), name='shipment-list-create'),
     
     # Admin CRUD via Routers
     path('', include(router.urls)),
@@ -47,11 +53,18 @@ urlpatterns = [
     path('carrier/<str:tracking_number>/', CarrierShipmentDetailView.as_view(), name='carrier-shipment-detail'),
     path('carrier/<str:tracking_number>/status/', CarrierShipmentStatusUpdateView.as_view(), name='carrier-status-update'),
     
-    # Shipments (Company Token Auth) - catch-all patterns MUST be last
-    path('', ShipmentListCreateView.as_view(), name='shipment-list-create'),
+    # Shipments
+
     path('<str:tracking_number>/', ShipmentDetailView.as_view(), name='shipment-detail'),
     path('<str:tracking_number>/cancel/', ShipmentCancelView.as_view(), name='shipment-cancel'),
     path('<str:tracking_number>/label/', ShipmentLabelView.as_view(), name='shipment-label'),
     path('<str:shipment_id>/label/download/', LabelDownloadView.as_view(), name='shipment-label-download'),
     path('<str:tracking_number>/status/', ShipmentStatusUpdateView.as_view(), name='shipment-status-update'),
+
+    # ─────────────────────────────────────────────────────────────────
+    # SIMPLE LIST ENDPOINTS (Selects/Dropdowns)
+    # ─────────────────────────────────────────────────────────────────
+    path('simple/service-types/', SimpleServiceTypeListView.as_view(), name='simple-service-type-list'),
+    path('simple/shipments/', SimpleShipmentListView.as_view(), name='simple-shipment-list'),
+    path('simple/webhooks/', SimpleWebhookListView.as_view(), name='simple-webhook-list'),
 ]

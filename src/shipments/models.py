@@ -4,12 +4,43 @@ from django.db import models
 from django.conf import settings
 
 
+STATE_CHOICES = [
+    ('1', 'Cairo'),
+    ('2', 'Alexandria'),
+    ('3', 'Kafr El Sheikh'),
+    ('4', 'Dakahleya'),
+    ('5', 'Sharkeya'),
+    ('6', 'Gharbeya'),
+    ('7', 'Monefeya'),
+    ('8', 'Qalyubia'),
+    ('9', 'Giza'),
+    ('10', 'Bani-Sweif'),
+    ('11', 'Fayoum'),
+    ('12', 'Menya'),
+    ('13', 'Assiut'),
+    ('14', 'Sohag'),
+    ('15', 'Qena'),
+    ('16', 'Luxor'),
+    ('17', 'Aswan'),
+    ('18', 'Red Sea'),
+    ('19', 'Behera'),
+    ('20', 'Ismailia'),
+    ('21', 'Suez'),
+    ('22', 'Port-Said'),
+    ('23', 'Damietta'),
+    ('24', 'Marsa Matrouh'),
+    ('25', 'Al-Wadi Al-Gadid'),
+    ('26', 'North Sinai'),
+    ('27', 'South Sinai'),
+]
+
+
 class Address(models.Model):
     """Model to store addresses for shipments."""
     name = models.CharField(max_length=255)
     street = models.CharField(max_length=500)
     city = models.CharField(max_length=100)
-    state = models.CharField(max_length=100)
+    state = models.CharField(max_length=50, choices=STATE_CHOICES)
     zip_code = models.CharField(max_length=20)
     country = models.CharField(max_length=100, default='Egypt')
     phone = models.CharField(max_length=20)
@@ -19,7 +50,7 @@ class Address(models.Model):
         verbose_name_plural = 'Addresses'
     
     def __str__(self):
-        return f"{self.name} - {self.city}, {self.state}"
+        return f"{self.name} - {self.city}, {self.get_state_display()}"
 
 
 class ServiceType(models.Model):

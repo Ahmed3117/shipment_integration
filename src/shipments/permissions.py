@@ -33,7 +33,7 @@ class IsAdmin(permissions.BasePermission):
         if isinstance(user, CompanyUser):
             return False
             
-        return user.user_type == 'admin' or user.is_staff or user.is_superuser
+        return user.user_type in ['admin', 'staff'] or user.is_staff or user.is_superuser
 
 
 class IsCarrier(permissions.BasePermission):
@@ -94,5 +94,5 @@ class IsCarrierOrAdmin(permissions.BasePermission):
             request.user and 
             request.user.is_authenticated and 
             not isinstance(request.user, CompanyUser) and
-            request.user.user_type in ['carrier', 'admin']
+            request.user.user_type in ['carrier', 'admin', 'staff']
         )

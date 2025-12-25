@@ -18,6 +18,10 @@ from .views import (
     UserListCreateView,
     UserDetailView,
     CarrierListView,
+    SimpleAdminListView,
+    SimpleStaffListView,
+    SimpleCarrierListView,
+    SimpleCompanyListView,
 )
 
 
@@ -54,7 +58,15 @@ urlpatterns = [
     # ─────────────────────────────────────────────────────────────────
     # ADMIN ENDPOINTS - Carrier Management (CRUD carriers only)
     # ─────────────────────────────────────────────────────────────────
-    path('admin/users/', UserListCreateView.as_view(), name='user-list-create'),
-    path('admin/users/<int:pk>/', UserDetailView.as_view(), name='user-detail'),
-    path('admin/carriers/', CarrierListView.as_view(), name='carrier-list'),
+    path('admin/carriers/', UserListCreateView.as_view(), name='user-list-create'),
+    path('admin/carriers/<int:pk>/', UserDetailView.as_view(), name='user-detail'),
+
+
+    # ─────────────────────────────────────────────────────────────────
+    # SIMPLE LIST ENDPOINTS (Selects/Dropdowns)
+    # ─────────────────────────────────────────────────────────────────
+    path('simple/admins/', SimpleAdminListView.as_view(), name='simple-admin-list'),
+    path('simple/staff/', SimpleStaffListView.as_view(), name='simple-staff-list'),
+    path('simple/carriers/', SimpleCarrierListView.as_view(), name='simple-carrier-list'),
+    path('simple/companies/', SimpleCompanyListView.as_view(), name='simple-company-list'),
 ]

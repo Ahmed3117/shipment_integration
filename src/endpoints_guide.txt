@@ -1,0 +1,170 @@
+# API Endpoints: Filters & Search Guide
+
+This document outlines the available filters and search capabilities for the Shipping Integration API endpoints.
+
+---
+
+## 1. Accounts Endpoints
+
+### **Superuser: List Companies**
+- **Endpoint:** `GET /accounts/superuser/companies/`
+- **Filters:**
+  - `is_active` (true/false)
+- **Search Keys:**
+  - `name`
+  - `phone`
+  - `email`
+  - `token`
+
+### **Superuser: List Users**
+- **Endpoint:** `GET /accounts/superuser/users/`
+- **Filters:**
+  - `user_type` (admin, carrier, staff)
+  - `company` (Company ID)
+- **Search Keys:**
+  - `company__name`
+  - `name`
+  - `phone`
+  - `email`
+  - `username`
+
+### **Admin: List Carriers**
+- **Endpoint:** `GET /accounts/admin/carriers/`
+- **Filters:**
+  - `user_type`
+  - `company`
+- **Search Keys:**
+  - `company__name`
+  - `name`
+  - `phone`
+  - `email`
+  - `username`
+
+---
+
+## 2. Shipments Endpoints
+
+### **Admin: Service Types**
+- **Endpoint:** `GET /shipments/admin/service-types/`
+- **Filters:**
+  - `company`
+  - `is_active`
+- **Search Keys:**
+  - `name`
+  - `code`
+  - `company__name`
+
+### **Admin: Webhooks**
+- **Endpoint:** `GET /shipments/admin/webhooks/`
+- **Filters:**
+  - `company`
+  - `is_active`
+- **Search Keys:**
+  - `company__name`
+  - `company__phone`
+  - `url`
+  - `secret`
+
+### **Admin: Shipments (Full Access)**
+- **Endpoint:** `GET /shipments/admin/`
+- **Filters:**
+  - `company`
+  - `carrier`
+  - `service_type`
+  - `status` (created, picked_up, in_transit, out_for_delivery, delivered, cancelled, returned)
+  - `sender_address__state` (State ID)
+  - `receiver_address__state` (State ID)
+- **Search Keys:**
+  - `tracking_number`
+  - `reference_number`
+  - **Company Info:** `company__name`, `company__token`, `company__email`, `company__phone`
+  - **Carrier Info:** `carrier__name`, `carrier__username`, `carrier__email`, `carrier__phone`
+
+### **Carrier: My Shipments**
+- **Endpoint:** `GET /shipments/carrier/`
+- **Filters:**
+  - `company`
+  - `service_type`
+  - `status`
+  - `sender_address__state`
+  - `receiver_address__state`
+  - **Date Range:** `start_date`, `end_date` (Format: YYYY-MM-DD)
+- **Search Keys:**
+  - `company__name`
+  - `company__token`
+  - `company__email`
+  - `company__phone`
+  - `carrier__name`
+  - `carrier__username`
+
+---
+
+## 3. Simple List Endpoints (For Selectors/Dropdowns)
+
+These endpoints return minimal data (`id`, `name`, and sometimes `username` or `code`) for use in frontend dropdowns or selectors.
+
+### **Superuser: Simple Lists**
+- **List Admins:** `GET /accounts/simple/admins/` (Returns: `id`, `username`, `name`)
+- **List Staff:** `GET /accounts/simple/staff/` (Returns: `id`, `username`, `name`)
+
+### **Admin / Superuser: Simple Lists**
+- **List Companies:** `GET /accounts/simple/companies/` (Returns: `id`, `name`)
+- **List Carriers:** `GET /accounts/simple/carriers/` (Returns: `id`, `username`, `name`)
+- **List Service Types:** `GET /shipments/simple/service-types/` (Returns: `id`, `name`, `code`)
+- **List Shipments:** `GET /shipments/simple/shipments/` (Returns: `id`, `reference_number`, `tracking_number`)
+- **List Webhooks:** `GET /shipments/simple/webhooks/` (Returns: `id`, `url`, `is_active`)
+
+---
+
+## 4. Usage Examples
+
+### **Search**
+Append `?search=QUERY` to the URL. The query will match against any of the defined search keys for that endpoint.
+- **Example:** `GET /shipments/admin/?search=01012345678` 
+  *(Searches for this phone number across company phones and carrier phones)*
+
+### **Filtering**
+Append `?FIELD_NAME=VALUE` to the URL.
+- **Example:** `GET /shipments/admin/?status=delivered&company=1`
+- **Example:** `GET /shipments/carrier/?sender_address__state=1` 
+  *(Filters for shipments originating from State ID 1)*
+
+### **Combined**
+You can combine search and filters.
+- **Example:** `GET /shipments/admin/?search=Cairo&status=created&sender_address__state=1`
+
+---
+
+## 5. Arabic Localization Changes
+
+The following endpoints have been updated to return `message` and `error` responses in Arabic.
+
+### **Account Management**
+
+| Endpoint / Action | Old Message (English) | New Message (Arabic) |
+| :--- | :--- | :--- |
+| **Create Company** | `Company created successfully.` | `تم إنشاء الشركة بنجاح.` |
+| **Delete Company** | `Company deleted successfully.` | `تم حذف الشركة بنجاح.` |
+| **Delete Company (Error)** | `Cannot delete company. It has X shipment(s).` | `لا يمكن حذف الشركة. لديها X شحنة (شحنات).` |
+| **Regenerate Token** | `API token regenerated successfully.` | `تم إعادة إنشاء رمز API بنجاح.` |
+| **Create Admin** | `Admin user created successfully.` | `تم إنشاء المستخدم المسؤول بنجاح.` |
+| **Create Carrier** | `Carrier user created successfully.` | `تم إنشاء المستخدم الناقل بنجاح.` |
+| **Delete User** | `User deleted successfully.` | `تم حذف المستخدم بنجاح.` |
+| **Delete Account (Error)** | `Cannot delete your own account.` | `لا يمكنك حذف حسابك الخاص.` |
+| **Delete Superuser (Error)** | `Cannot delete another superuser account.` | `لا يمكن حذف حساب مسؤول متميز آخر.` |
+
+### **Shipment Operations**
+
+| Endpoint / Action | Old Message (English) | New Message (Arabic) |
+| :--- | :--- | :--- |
+| **Create Shipment** | `Shipment created successfully.` | `تم إنشاء الشحنة بنجاح.` |
+| **Duplicate Ref Ref** | `Shipment with this reference_number already exists.` | `شحنة بنفس الرقم المرجعي موجودة بالفعل.` |
+| **Cancel Shipment** | `Shipment cancelled successfully.` | `تم إلغاء الشحنة بنجاح.` |
+| **Cancel Error (Status)** | `Cannot cancel shipment with status: X` | `لا يمكن إلغاء الشحنة بالحالة: X` |
+| **Cancel Error (Transit)** | `Cannot cancel shipment that is already in transit.` | `لا يمكن إلغاء شحنة قيد النقل بالفعل. يرجى الاتصال بالدعم.` |
+| **Status Update** | `Shipment status updated to X.` | `تم تحديث حالة الشحنة إلى X.` |
+| **Carrier Pick Up** | `Shipment picked up successfully.` | `تم استلام الشحنة بنجاح.` |
+| **Pick Up Error (Assigned)**| `Shipment is already assigned to another carrier.` | `الشحنة معينة بالفعل لناقل آخر.` |
+| **Assign Carrier (Error)** | `Carrier not found.` | `الناقل غير موجود.` |
+| **Service Type Error** | `No services available for your account.` | `لا توجد خدمات متاحة لحسابك.` |
+| **Missing Company Error** | `A valid company token or id is required.` | `مطلوب رمز شركة صالح (X-Company-Token) أو تحديد هوية الشركة.` |

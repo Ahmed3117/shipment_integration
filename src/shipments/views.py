@@ -24,10 +24,15 @@ from .serializers import (
     ShipmentStatusUpdateSerializer,
     CarrierShipmentListSerializer,
     BulkAssignCarrierSerializer,
+    SimpleServiceTypeSerializer,
+    SimpleShipmentSerializer,
+    SimpleWebhookSerializer,
 )
 from .services import update_shipment_status, send_webhook_notification
 from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin, IsCompany, IsCompanyOrAdmin
 from accounts.authentication import CompanyUser
+from rest_framework import filters
+from django_filters.rest_framework import DjangoFilterBackend
 
 
 # --- Service Types (Public) ---
@@ -55,6 +60,9 @@ class AdminServiceTypeViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ServiceTypeAdminSerializer
     permission_classes = [IsAdmin]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company', 'is_active']
+    search_fields = ['name', 'code', 'company__name']
     
     def get_queryset(self):
         user = self.request.user
@@ -80,8 +88,8 @@ class AdminServiceTypeViewSet(viewsets.ModelViewSet):
         if shipment_count > 0:
             return Response(
                 {
-                    'error': f'Cannot delete service type. It is used in {shipment_count} shipment(s).',
-                    'suggestion': 'Consider deactivating it instead by setting is_active to false.'
+                    'error': f'لا يمكن حذف نوع الخدمة. يتم استخدامها في {shipment_count} شحنة (شحنات).',
+                    'suggestion': 'فكر في إلغاء تنشيطه بدلاً من ذلك عن طريق تعيين is_active إلى false.'
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
@@ -114,7 +122,7 @@ class CalculateRatesView(generics.GenericAPIView):
             services = services.filter(company=company)
         elif not user.is_superuser:
             # If not superuser and no company found, no services available
-            return Response({'error': 'No services available for your account.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'لا توجد خدمات متاحة لحسابك.'}, status=status.HTTP_403_FORBIDDEN)
             
         rates = []
         
@@ -241,7 +249,7 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
         # 3. If no company detected yet, explicitly require it
         if not company:
             return Response(
-                {'error': 'A valid company token (X-Company-Token) or company identification is required.'}, 
+                {'error': 'مطلوب رمز شركة صالح (X-Company-Token) أو تحديد هوية الشركة.'}, 
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
@@ -255,14 +263,14 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
         if existing:
             response_serializer = ShipmentDetailSerializer(existing)
             return Response({
-                'message': 'Shipment with this reference_number already exists.',
+                'message': 'شحنة بنفس الرقم المرجعي موجودة بالفعل.',
                 'shipment': response_serializer.data
             }, status=status.HTTP_200_OK)
 
         shipment = serializer.save(company=company)
         response_serializer = ShipmentDetailSerializer(shipment)
         return Response({
-            'message': 'Shipment created successfully.',
+            'message': 'تم إنشاء الشحنة بنجاح.',
             'shipment': response_serializer.data
         }, status=status.HTTP_201_CREATED)
 
@@ -296,7 +304,7 @@ class ShipmentDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         if instance.status not in ['pending', 'cancelled']:
             return Response(
-                {'error': 'Can only delete pending or cancelled shipments.'},
+                {'error': 'يمكن حذف الشحنات المعلقة أو الملغاة فقط.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         self.perform_destroy(instance)
@@ -314,12 +322,12 @@ class ShipmentCancelView(generics.GenericAPIView):
         
         if shipment.status in ['delivered', 'cancelled']:
             return Response({
-                'error': f'Cannot cancel shipment with status: {shipment.status}'
+                'error': f'لا يمكن إلغاء الشحنة بالحالة: {shipment.status}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         if shipment.status in ['picked_up', 'in_transit', 'out_for_delivery']:
             return Response({
-                'error': 'Cannot cancel shipment that is already in transit. Please contact support.'
+                'error': 'لا يمكن إلغاء شحنة قيد النقل بالفعل. يرجى الاتصال بالدعم.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         shipment.status = 'cancelled'
@@ -333,10 +341,10 @@ class ShipmentCancelView(generics.GenericAPIView):
         )
         
         return Response({
-            'message': 'Shipment cancelled successfully.',
+            'message': 'تم إلغاء الشحنة بنجاح.',
             'shipment_id': str(shipment.id),
             'tracking_number': shipment.tracking_number,
-            'refund_status': 'Refund will be processed within 3-5 business days.' if shipment.estimated_cost > 0 else 'No refund applicable.'
+            'refund_status': 'ستتم معالجة الاسترداد خلال 3-5 أيام عمل.' if shipment.estimated_cost > 0 else 'لا ينطبق استرداد.'
         })
 
 
@@ -351,7 +359,7 @@ class ShipmentLabelView(generics.GenericAPIView):
         
         if shipment.status == 'cancelled':
             return Response({
-                'error': 'Cannot generate label for cancelled shipment.'
+                'error': 'لا يمكن إنشاء ملصق لشحنة ملغاة.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # In a real implementation, this would generate or fetch the actual label
@@ -432,6 +440,9 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
     Admins can only see and manage webhooks for their own company.
     """
     permission_classes = [IsAdmin]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company', 'is_active']
+    search_fields = ['company__name', 'company__phone', 'url', 'secret']
     lookup_field = 'pk'
     
     def get_serializer_class(self):
@@ -456,13 +467,13 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
             company_id = self.request.data.get('company_id')
             if not company_id:
                 from rest_framework.exceptions import ValidationError
-                raise ValidationError({'company_id': 'Company ID is required for superusers.'})
+                raise ValidationError({'company_id': 'مطلوب معرف الشركة للمشرفين المتميزين.'})
             from accounts.models import Company
             try:
                 company = Company.objects.get(id=company_id)
             except Company.DoesNotExist:
                 from rest_framework.exceptions import ValidationError
-                raise ValidationError({'company_id': 'Invalid company ID.'})
+                raise ValidationError({'company_id': 'معرف الشركة غير صالح.'})
         else:
             company = user.company
             
@@ -473,7 +484,7 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
         response = super().create(request, *args, **kwargs)
         # Wrap response data for consistency (optional but following existing style)
         return Response({
-            'message': 'Webhook registered successfully.',
+            'message': 'تم تسجيل الويب هوك بنجاح.',
             'webhook': response.data
         }, status=status.HTTP_201_CREATED)
 
@@ -481,7 +492,7 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         self.perform_destroy(instance)
         return Response({
-            'message': 'Webhook deleted successfully.'
+            'message': 'تم حذف الويب هوك بنجاح.'
         }, status=status.HTTP_200_OK)
 
 
@@ -507,12 +518,12 @@ class ShipmentStatusUpdateView(generics.GenericAPIView):
         # Validate status transition
         if shipment.status == 'cancelled':
             return Response({
-                'error': 'Cannot update status of a cancelled shipment.'
+                'error': 'لا يمكن تحديث حالة شحنة ملغاة.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         if shipment.status == 'delivered' and new_status != 'returned':
             return Response({
-                'error': 'Delivered shipment can only be changed to returned.'
+                'error': 'الشحنة المسلمة يمكن تغييرها فقط إلى مرتجعة.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Update status and send webhooks
@@ -525,7 +536,7 @@ class ShipmentStatusUpdateView(generics.GenericAPIView):
         )
         
         return Response({
-            'message': f'Shipment status updated to {new_status}.',
+            'message': f'تم تحديث حالة الشحنة إلى {new_status}.',
             'shipment_id': str(shipment.id),
             'tracking_number': shipment.tracking_number,
             'new_status': new_status,
@@ -541,14 +552,15 @@ class CarrierShipmentListView(generics.ListAPIView):
     """
     serializer_class = CarrierShipmentListSerializer
     permission_classes = [IsCarrier]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company', 'service_type', 'status', 'sender_address__state', 'receiver_address__state']
+    search_fields = ['company__name', 'company__token', 'company__email', 'company__phone', 'carrier__name', 'carrier__username']
     
     def get_queryset(self):
         queryset = Shipment.objects.filter(carrier=self.request.user)
         
-        # Filter by status
-        status_filter = self.request.query_params.get('status')
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
+        # Note: 'status' filter is now handled by DjangoFilterBackend, 
+        # but date range is still custom here.
         
         # Filter by date range
         start_date = self.request.query_params.get('start_date')
@@ -601,7 +613,7 @@ class CarrierShipmentStatusUpdateView(generics.GenericAPIView):
         )
 
         return Response({
-            'message': f'Shipment status updated to {new_status}.',
+            'message': f'تم تحديث حالة الشحنة إلى {new_status}.',
             'tracking_number': shipment.tracking_number,
             'status': new_status
         })
@@ -619,24 +631,24 @@ class CarrierStatusUpdateByScanView(generics.GenericAPIView):
         
         if not shipment:
             return Response({
-                'error': 'Shipment not found.'
+                'error': 'الشحنة غير موجودة.'
             }, status=status.HTTP_404_NOT_FOUND)
 
         # 1. Company check
         if shipment.company != request.user.company:
             return Response({
-                'error': 'Shipment belongs to a different company.'
+                'error': 'الشحنة تابعة لشركة أخرى.'
             }, status=status.HTTP_403_FORBIDDEN)
 
         # 2. Assignment check
         if shipment.carrier == request.user:
             return Response({
-                'error': 'Shipment is already assigned to you.'
+                'error': 'الشحنة معينة لك بالفعل.'
             }, status=status.HTTP_400_BAD_REQUEST)
             
         if shipment.carrier is not None:
             return Response({
-                'error': f'Shipment is already assigned to another carrier ({shipment.carrier.username}).'
+                'error': f'الشحنة معينة بالفعل لناقل آخر ({shipment.carrier.username}).'
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Perform assignment and update status to picked_up
@@ -652,7 +664,7 @@ class CarrierStatusUpdateByScanView(generics.GenericAPIView):
         )
         
         return Response({
-            'message': 'Shipment picked up successfully.',
+            'message': 'تم استلام الشحنة بنجاح.',
             'shipment_id': shipment.id,
             'tracking_number': shipment.tracking_number,
             'status': 'picked_up',
@@ -668,6 +680,9 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ShipmentDetailSerializer
     permission_classes = [IsAdmin]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company', 'carrier', 'service_type', 'status', 'sender_address__state', 'receiver_address__state']
+    search_fields = ['company__name', 'company__token', 'company__email', 'company__phone', 'carrier__name', 'carrier__username', 'carrier__email', 'carrier__phone', 'tracking_number', 'reference_number']
     lookup_field = 'id'
 
     def get_serializer_class(self):
@@ -688,20 +703,11 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
         return Shipment.objects.none()
 
     def perform_create(self, serializer):
-        user = self.request.user
-        company = None
-        if user.is_superuser:
-            company_id = self.request.data.get('company_id') or self.request.data.get('company')
-            if company_id:
-                from accounts.models import Company
-                company = Company.objects.filter(id=company_id).first()
-        else:
-            company = user.company
-            
-        if not company:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError({"company": "Valid company is required."})
-        serializer.save(company=company)
+        # We rely on serializer validation but we need to ensure the user is passed in context
+        # (which it is by default in ViewSets).
+        # We don't manually assign company here anymore because the serializer create() logic handles it
+        # strictly based on superuser/admin status.
+        serializer.save()
 
     @action(detail=False, methods=['post'], url_path='bulk-assign-carrier')
     def bulk_assign_carrier(self, request):
@@ -715,13 +721,13 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
         try:
             carrier = User.objects.get(id=carrier_id, user_type='carrier')
         except User.DoesNotExist:
-            return Response({"error": "Carrier not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "الناقل غير موجود."}, status=status.HTTP_404_NOT_FOUND)
 
         # Security/Requirement Checks
         user = request.user
         if not user.is_superuser:
             if carrier.company != user.company:
-                return Response({"error": "Carrier does not belong to your company."}, status=status.HTTP_403_FORBIDDEN)
+                return Response({"error": "الناقل لا ينتمي لشركتك."}, status=status.HTTP_403_FORBIDDEN)
 
         # Categorize shipments
         successfully_assigned = []
@@ -776,10 +782,72 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
         detail_serializer = ShipmentDetailSerializer
         
         return Response({
-            "message": f"Successfully assigned {len(successfully_assigned)} shipments to carrier {carrier.name or carrier.username}.",
+            "message": f"تم تعيين {len(successfully_assigned)} شحنة بنجاح للناقل {carrier.name or carrier.username}.",
             "carrier_id": carrier_id,
             "successfully_assigned_shipments": detail_serializer(successfully_assigned, many=True).data,
             "already_assigned_for_this_caarier": detail_serializer(already_assigned, many=True).data,
             "assigne_for_another_carrier": detail_serializer(another_carrier, many=True).data,
-            "notfound_shpments": notfound_shipments # Keep as IDs as they don't exist in DB
+            "notfound_shpments": notfound_shipments 
         })
+
+
+# ─────────────────────────────────────────────────────────────────
+# SIMPLE LIST ENDPOINTS (Dropdowns/Selectors)
+# ─────────────────────────────────────────────────────────────────
+
+class SimpleServiceTypeListView(generics.ListAPIView):
+    """
+    List Service Types (Simple).
+    Superuser: All.
+    Admin: Their company only.
+    Returns: id, name, code.
+    """
+    permission_classes = [IsAdmin]
+    serializer_class = SimpleServiceTypeSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return ServiceType.objects.all().order_by('name')
+        if hasattr(user, 'company') and user.company:
+            return ServiceType.objects.filter(company=user.company).order_by('name')
+        return ServiceType.objects.none()
+
+
+class SimpleShipmentListView(generics.ListAPIView):
+    """
+    List Shipments (Simple).
+    Superuser: All.
+    Admin: Their company only.
+    Returns: id, reference_number, tracking_number.
+    """
+    permission_classes = [IsAdmin]
+    serializer_class = SimpleShipmentSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return Shipment.objects.all().order_by('-created_at')
+        if hasattr(user, 'company') and user.company:
+            return Shipment.objects.filter(company=user.company).order_by('-created_at')
+        return Shipment.objects.none()
+
+
+class SimpleWebhookListView(generics.ListAPIView):
+    """
+    List Webhooks (Simple).
+    Superuser: All.
+    Admin: Their company only.
+    Returns: id, url, is_active.
+    """
+    permission_classes = [IsAdmin]
+    serializer_class = SimpleWebhookSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return Webhook.objects.all().order_by('-created_at')
+        if hasattr(user, 'company') and user.company:
+            return Webhook.objects.filter(company=user.company).order_by('-created_at')
+        return Webhook.objects.none()
+

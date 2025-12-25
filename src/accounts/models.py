@@ -56,6 +56,7 @@ class User(AbstractUser):
     USER_TYPE_CHOICES = [
         ('carrier', 'Carrier'),
         ('admin', 'Admin'),
+        ('staff', 'Staff'),
     ]
     
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='admin')
@@ -74,6 +75,11 @@ class User(AbstractUser):
     
     class Meta:
         db_table = 'users'
+
+    def save(self, *args, **kwargs):
+        if self.is_superuser or self.is_staff:
+            self.user_type = 'staff'
+        super().save(*args, **kwargs)
     
     @property
     def is_carrier(self):

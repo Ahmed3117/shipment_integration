@@ -1,8 +1,15 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
 from decimal import Decimal
-from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook
+from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook, STATE_CHOICES
 from accounts.models import Company
+
+
+class SimpleCompanySerializer(serializers.ModelSerializer):
+    """Simple serializer for listing companies."""
+    class Meta:
+        model = Company
+        fields = ['id', 'name']
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -34,10 +41,7 @@ class AddressSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Invalid city name.')
         return value.strip()
     
-    def validate_state(self, value):
-        if not value or len(value.strip()) < 2:
-            raise serializers.ValidationError('Invalid state name.')
-        return value.strip()
+
     
     def validate_street(self, value):
         if not value or len(value.strip()) < 5:
@@ -55,6 +59,13 @@ class ServiceTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceType
         fields = ['id', 'name', 'code', 'base_rate', 'rate_per_kg', 'estimated_days_min', 'estimated_days_max']
+
+
+class SimpleServiceTypeSerializer(serializers.ModelSerializer):
+    """Simple serializer for listing service types."""
+    class Meta:
+        model = ServiceType
+        fields = ['id', 'name', 'code']
 
 
 class ServiceTypeAdminSerializer(serializers.ModelSerializer):
@@ -155,12 +166,12 @@ class ServiceTypeAdminSerializer(serializers.ModelSerializer):
 # --- Rate Calculation Serializers ---
 class RateCalculationRequestSerializer(serializers.Serializer):
     origin_city = serializers.CharField(max_length=100)
-    origin_state = serializers.CharField(max_length=100)
+    origin_state = serializers.ChoiceField(choices=STATE_CHOICES)
     origin_zip_code = serializers.CharField(max_length=20)
     origin_country = serializers.CharField(max_length=100, default='USA')
     
     destination_city = serializers.CharField(max_length=100)
-    destination_state = serializers.CharField(max_length=100)
+    destination_state = serializers.ChoiceField(choices=STATE_CHOICES)
     destination_zip_code = serializers.CharField(max_length=20)
     destination_country = serializers.CharField(max_length=100, default='USA')
     
@@ -184,7 +195,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
     sender_address = AddressSerializer(required=False, allow_null=True)
     receiver_address = AddressSerializer()
     
-    company = serializers.SerializerMethodField()
+    company = serializers.PrimaryKeyRelatedField(queryset=Company.objects.all(), required=False, allow_null=True)
     carrier = serializers.SerializerMethodField()
     
     class Meta:
@@ -194,12 +205,15 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'company', 'carrier'
         ]
-        read_only_fields = ['id', 'company', 'carrier']
+        read_only_fields = ['id', 'carrier']
 
-    def get_company(self, obj):
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
         from accounts.serializers import CompanySerializer
-        return CompanySerializer(obj.company).data if obj.company else None
-
+        if instance.company:
+            ret['company'] = CompanySerializer(instance.company).data
+        return ret
+    
     def get_carrier(self, obj):
         from accounts.serializers import CarrierSerializer
         return CarrierSerializer(obj.carrier).data if obj.carrier else None
@@ -222,6 +236,49 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         sender_data = validated_data.pop('sender_address', None)
         receiver_data = validated_data.pop('receiver_address')
         
+        # Handle Company Assignment
+        request = self.context.get('request')
+        user = request.user if request else None
+        
+        # Determine company based on user type & input
+        # Note: validated_data['company'] will contain the Company object if passed and valid
+        company_input = validated_data.get('company')
+        company = None
+        
+        if user:
+            if user.is_superuser:
+                # Superuser: explicit input -> user.company -> error
+                if company_input:
+                    company = company_input
+                elif hasattr(user, 'company') and user.company:
+                    company = user.company
+                else:
+                    raise serializers.ValidationError({'company': 'Company is required for superusers not assigned to a company.'})
+            else:
+                # Regular Admin/Staff:
+                # 1. If they provide a company input, CHECK if it matches their own.
+                if company_input:
+                    # company_input is an object because PrimaryKeyRelatedField resolves it
+                    if hasattr(user, 'company') and user.company:
+                        if company_input.id != user.company.id:
+                            raise serializers.ValidationError({'company': 'You do not have access to create shipments for this company.'})
+                        company = user.company
+                    else:
+                        raise serializers.ValidationError({'detail': 'User is not assigned to any company.'})
+                
+                # 2. If no input, default to their own company
+                elif hasattr(user, 'company') and user.company:
+                    company = user.company
+                else:
+                     raise serializers.ValidationError({'detail': 'User is not assigned to any company.'})
+
+        # Final check
+        if not company:
+             raise serializers.ValidationError({'company': 'Company assignment failed.'})
+             
+        # Ensure correct company is set in validated_data for creation
+        validated_data['company'] = company
+
         sender = None
         if sender_data:
             sender = Address.objects.create(**sender_data)
@@ -258,6 +315,14 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         )
         
         return shipment
+
+
+
+class SimpleShipmentSerializer(serializers.ModelSerializer):
+    """Simple serializer for listing shipments."""
+    class Meta:
+        model = Shipment
+        fields = ['id', 'reference_number', 'tracking_number']
 
 
 class ShipmentListSerializer(serializers.ModelSerializer):
@@ -321,6 +386,14 @@ class TrackingResponseSerializer(serializers.Serializer):
 
 
 # --- Webhook Serializers ---
+
+class SimpleWebhookSerializer(serializers.ModelSerializer):
+    """Simple serializer for listing webhooks."""
+    class Meta:
+        model = Webhook
+        fields = ['id', 'url', 'is_active']
+
+
 class WebhookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Webhook
