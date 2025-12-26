@@ -278,7 +278,7 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
 class ShipmentDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update, or delete shipment details by tracking number."""
     serializer_class = ShipmentDetailSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsCompanyOrAdmin]
     lookup_field = 'tracking_number'
     lookup_url_kwarg = 'tracking_number'
 
@@ -287,18 +287,50 @@ class ShipmentDetailView(generics.RetrieveUpdateDestroyAPIView):
         if not user or not user.is_authenticated:
             return Shipment.objects.none()
 
+        # For the queryset, we return all shipments if superuser,
+        # otherwise we return shipments for the specific company to ensure 404/403 logic works.
         queryset = Shipment.objects.all()
         if user.is_superuser:
             return queryset
 
-        if isinstance(user, CompanyUser):
-            queryset = queryset.filter(company=user.company)
-        elif hasattr(user, 'company') and user.company:
-            queryset = queryset.filter(company=user.company)
-        else:
-            return Shipment.objects.none()
-
+        # We return the full queryset here but check ownership in get_object 
+        # to provide the specific required error message.
         return queryset
+
+    def get_object(self):
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Perform the lookup
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+        
+        # First check if the shipment exists at all
+        shipment = Shipment.objects.filter(**filter_kwargs).first()
+        
+        if not shipment:
+            from django.http import Http404
+            raise Http404
+
+        # Check company ownership
+        user = self.request.user
+        
+        # Superuser can see everything
+        if user.is_superuser:
+            return shipment
+
+        # Get the user's company
+        user_company = None
+        if isinstance(user, CompanyUser):
+            user_company = user.company
+        elif hasattr(user, 'company'):
+            user_company = user.company
+
+        # If User has a company, check if it matches the shipment's company
+        if user_company and shipment.company != user_company:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied({'error': 'هذه الشحنة غير تابعة لهذة الشركة'})
+            
+        return shipment
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -317,8 +349,20 @@ class ShipmentCancelView(generics.GenericAPIView):
     permission_classes = [IsCompany]
     
     def post(self, request, tracking_number):
-        company = request.user.company
-        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, company=company)
+        user = request.user
+        # Standard lookup
+        shipment = Shipment.objects.filter(tracking_number=tracking_number).first()
+        if not shipment:
+            from django.http import Http404
+            raise Http404
+            
+        # Ownership check
+        user_company = getattr(user, 'company', None)
+        if hasattr(user, 'company_id') and user.company_id:
+             user_company = user.company
+
+        if not user.is_superuser and shipment.company != user_company:
+            return Response({'error': 'هذه الشحنة غير تابعة لهذة الشركة'}, status=status.HTTP_403_FORBIDDEN)
         
         if shipment.status in ['delivered', 'cancelled']:
             return Response({
@@ -344,7 +388,8 @@ class ShipmentCancelView(generics.GenericAPIView):
             'message': 'تم إلغاء الشحنة بنجاح.',
             'shipment_id': str(shipment.id),
             'tracking_number': shipment.tracking_number,
-            'refund_status': 'ستتم معالجة الاسترداد خلال 3-5 أيام عمل.' if shipment.estimated_cost > 0 else 'لا ينطبق استرداد.'
+            'is_paid': shipment.is_paid,
+            'status': shipment.status
         })
 
 
@@ -354,8 +399,17 @@ class ShipmentLabelView(generics.GenericAPIView):
     permission_classes = [IsCompany]
     
     def get(self, request, tracking_number):
-        company = request.user.company
-        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, company=company)
+        user = request.user
+        # Standard lookup
+        shipment = Shipment.objects.filter(tracking_number=tracking_number).first()
+        if not shipment:
+            from django.http import Http404
+            raise Http404
+
+        # Ownership check
+        user_company = getattr(user, 'company', None)
+        if not user.is_superuser and shipment.company != user_company:
+            return Response({'error': 'هذه الشحنة غير تابعة لهذة الشركة'}, status=status.HTTP_403_FORBIDDEN)
         
         if shipment.status == 'cancelled':
             return Response({
@@ -804,6 +858,9 @@ class SimpleServiceTypeListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleServiceTypeSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company']
 
     def get_queryset(self):
         user = self.request.user
@@ -823,6 +880,10 @@ class SimpleShipmentListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleShipmentSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company']
+    
 
     def get_queryset(self):
         user = self.request.user
@@ -842,6 +903,9 @@ class SimpleWebhookListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleWebhookSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company']
 
     def get_queryset(self):
         user = self.request.user

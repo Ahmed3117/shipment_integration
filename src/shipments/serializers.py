@@ -203,7 +203,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'reference_number', 'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
-            'service_type', 'company', 'carrier'
+            'service_type', 'company', 'carrier', 'is_paid'
         ]
         read_only_fields = ['id', 'carrier']
 
@@ -322,7 +322,7 @@ class SimpleShipmentSerializer(serializers.ModelSerializer):
     """Simple serializer for listing shipments."""
     class Meta:
         model = Shipment
-        fields = ['id', 'reference_number', 'tracking_number']
+        fields = ['id', 'reference_number', 'tracking_number', 'is_paid']
 
 
 class ShipmentListSerializer(serializers.ModelSerializer):
@@ -335,7 +335,7 @@ class ShipmentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status', 'company', 'carrier',
+            'id', 'tracking_number', 'reference_number', 'status', 'is_paid', 'company', 'carrier',
             'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
@@ -357,7 +357,7 @@ class ShipmentDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status', 'company', 'carrier',
+            'id', 'tracking_number', 'reference_number', 'status', 'is_paid', 'company', 'carrier',
             'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',
@@ -450,7 +450,7 @@ class CarrierShipmentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shipment
         fields = [
-            'id', 'tracking_number', 'reference_number', 'status',
+            'id', 'tracking_number', 'reference_number', 'status', 'is_paid',
             'sender_address', 'receiver_address',
             'weight', 'content_description',
             'service_type', 'estimated_cost', 'estimated_delivery_date',

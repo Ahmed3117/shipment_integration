@@ -137,11 +137,11 @@ class SuperuserUserListView(generics.ListAPIView):
     serializer_class = UserListSerializer
     permission_classes = [IsSuperuser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['user_type', 'company']
+    filterset_fields = ['user_type', 'company', 'is_active']
     search_fields = ['company__name', 'name', 'phone', 'email', 'username']
-    
+        
     def get_queryset(self):
-        queryset = User.objects.all()
+        queryset = User.objects.exclude(is_superuser=True)
         user_type = self.request.query_params.get('user_type')
         if user_type:
             queryset = queryset.filter(user_type=user_type)
@@ -256,7 +256,7 @@ class UserListCreateView(generics.ListCreateAPIView):
 
     permission_classes = [IsAdmin]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['user_type', 'company']
+    filterset_fields = ['user_type', 'company', 'is_active']
     search_fields = ['company__name', 'name', 'phone', 'email', 'username']
     
     def get_serializer_class(self):
@@ -359,6 +359,9 @@ class SimpleAdminListView(generics.ListAPIView):
     """
     permission_classes = [IsSuperuser]
     serializer_class = SimpleUserSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company']
 
     def get_queryset(self):
         return User.objects.filter(user_type='admin').order_by('username')
@@ -372,6 +375,7 @@ class SimpleStaffListView(generics.ListAPIView):
     """
     permission_classes = [IsSuperuser]
     serializer_class = SimpleUserSerializer
+    pagination_class = None
 
     def get_queryset(self):
         return User.objects.filter(user_type='staff').order_by('username')
@@ -387,6 +391,9 @@ class SimpleCarrierListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleUserSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['company', 'is_active']
 
     def get_queryset(self):
         user = self.request.user
@@ -405,6 +412,7 @@ class SimpleCompanyListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleCompanySerializer
+    pagination_class = None
 
     def get_queryset(self):
         user = self.request.user
