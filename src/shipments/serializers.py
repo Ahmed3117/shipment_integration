@@ -226,9 +226,9 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, attrs):
-        # Validate dimensions
+        # Validate dimensions only if they are being provided
         for field in ['length', 'width', 'height']:
-            if attrs.get(field, 0) <= 0:
+            if field in attrs and attrs[field] <= 0:
                 raise serializers.ValidationError({field: f'{field.capitalize()} must be greater than 0.'})
         return attrs
     
@@ -316,13 +316,62 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         
         return shipment
 
+    def update(self, instance, validated_data):
+        sender_data = validated_data.pop('sender_address', None)
+        receiver_data = validated_data.pop('receiver_address', None)
+        
+        # Standard fields update
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        # Nested Address Update - Sender
+        if sender_data:
+            if instance.sender_address:
+                for attr, value in sender_data.items():
+                    setattr(instance.sender_address, attr, value)
+                instance.sender_address.save()
+            else:
+                instance.sender_address = Address.objects.create(**sender_data)
+
+        # Nested Address Update - Receiver
+        if receiver_data:
+            if instance.receiver_address:
+                for attr, value in receiver_data.items():
+                    setattr(instance.receiver_address, attr, value)
+                instance.receiver_address.save()
+            else:
+                instance.receiver_address = Address.objects.create(**receiver_data)
+
+        # Recalculate cost and delivery date if weight or service_type changed
+        if 'weight' in validated_data or 'service_type' in validated_data:
+            service_type = instance.service_type
+            weight = instance.weight
+            instance.estimated_cost = service_type.base_rate + (service_type.rate_per_kg * weight)
+            
+            if 'service_type' in validated_data:
+                from datetime import date, timedelta
+                instance.estimated_delivery_date = date.today() + timedelta(days=service_type.estimated_days_max)
+            
+        instance.save()
+        return instance
+
 
 
 class SimpleShipmentSerializer(serializers.ModelSerializer):
     """Simple serializer for listing shipments."""
+    receiver_address = serializers.SerializerMethodField()
+
     class Meta:
         model = Shipment
-        fields = ['id', 'reference_number', 'tracking_number', 'is_paid']
+        fields = ['id', 'reference_number', 'tracking_number', 'is_paid', 'receiver_address']
+
+    def get_receiver_address(self, obj):
+        if obj.receiver_address:
+            return {
+                'city': obj.receiver_address.city,
+                'state': obj.receiver_address.state
+            }
+        return None
 
 
 class ShipmentListSerializer(serializers.ModelSerializer):
@@ -395,10 +444,12 @@ class SimpleWebhookSerializer(serializers.ModelSerializer):
 
 
 class WebhookSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at']
-        read_only_fields = ['id', 'secret', 'created_at']
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name']
+        read_only_fields = ['id', 'secret', 'created_at', 'company_name']
     
     def validate_url(self, value):
         if not value.startswith('https://'):
@@ -408,10 +459,12 @@ class WebhookSerializer(serializers.ModelSerializer):
 
 class WebhookCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating webhooks (secret is auto-generated)."""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        fields = ['id', 'url', 'is_active', 'created_at', 'company', 'company_name']
+        read_only_fields = ['id', 'created_at', 'company_name']
     
     def validate_url(self, value):
         if not value.startswith('https://'):
@@ -421,9 +474,11 @@ class WebhookCreateSerializer(serializers.ModelSerializer):
 
 class WebhookDetailSerializer(serializers.ModelSerializer):
     """Serializer showing webhook with secret (only on creation)."""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at']
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name']
         read_only_fields = fields
 
 

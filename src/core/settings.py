@@ -146,7 +146,7 @@ REST_FRAMEWORK = {
     #    'user': '3000/hour' # Limit authenticated users to 1000 requests per hour
     #},
 
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'accounts.pagination.CustomPageNumberPagination',
     'PAGE_SIZE': 100,
 }
 

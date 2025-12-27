@@ -740,7 +740,7 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
     lookup_field = 'id'
 
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.action in ['create', 'update', 'partial_update']:
             return ShipmentCreateSerializer
         if self.action == 'bulk_assign_carrier':
             return BulkAssignCarrierSerializer
