@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook
+from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook, SentWebhook
 
 
 @admin.register(Address)
@@ -32,3 +32,10 @@ class TrackingEventAdmin(admin.ModelAdmin):
 class WebhookAdmin(admin.ModelAdmin):
     list_display = ['company', 'url', 'is_active', 'created_at']
     list_filter = ['is_active', 'company']
+
+@admin.register(SentWebhook)
+class SentWebhookAdmin(admin.ModelAdmin):
+    list_display = ['webhook', 'sending_status', 'created_at']
+    list_filter = ['sending_status', 'created_at']
+    search_fields = ['webhook__url']
+    readonly_fields = ['created_at', 'updated_at']

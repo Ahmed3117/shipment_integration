@@ -21,6 +21,9 @@ from .views import (
     SimpleServiceTypeListView,
     SimpleShipmentListView,
     SimpleWebhookListView,
+    SentWebhookListView,
+    SentWebhookResendView,
+    SentWebhookManualCreateView,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -35,6 +38,11 @@ urlpatterns = [
     
     # Shipments (Company Token Auth)
     path('', ShipmentListCreateView.as_view(), name='shipment-list-create'),
+    
+    # Sent Webhooks (Company Token Auth)
+    path('webhooks/sent/', SentWebhookListView.as_view(), name='sent-webhook-list'),
+    path('webhooks/sent/<int:pk>/resend/', SentWebhookResendView.as_view(), name='sent-webhook-resend'),
+    path('webhooks/sent/manual/', SentWebhookManualCreateView.as_view(), name='sent-webhook-manual-trigger'),
     
     # Admin CRUD via Routers
     path('', include(router.urls)),

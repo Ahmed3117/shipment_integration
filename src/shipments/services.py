@@ -7,7 +7,7 @@ from datetime import datetime
 import requests
 from django.conf import settings
 
-from .models import Webhook, Shipment
+from .models import Webhook, Shipment, SentWebhook
 
 logger = logging.getLogger(__name__)
 
@@ -21,37 +21,52 @@ def generate_webhook_signature(secret: str, payload: str) -> str:
     ).hexdigest()
 
 
-def send_webhook_notification(shipment: Shipment, event: str):
+def send_webhook_notification(shipment: Shipment, event: str, manual_payload: dict = None, webhook_id: int = None):
     """
-    Send webhook notifications to all registered URLs for the company.
+    Send webhook notifications to all registered URLs for the company or a specific one.
     
     Args:
         shipment: The Shipment instance that triggered the event
         event: The event type (e.g., 'shipment.status_changed')
+        manual_payload: Optional payload to override default one (for manual resend/creation)
+        webhook_id: Optional ID of a specific webhook to send to
     """
-    # Get all active webhooks for this company
-    webhooks = Webhook.objects.filter(
-        company=shipment.company,
-        is_active=True
-    )
+    # Get webhooks
+    if webhook_id:
+        webhooks = Webhook.objects.filter(
+            id=webhook_id,
+            is_active=True
+        )
+    else:
+        webhooks = Webhook.objects.filter(
+            company=shipment.company,
+            is_active=True
+        )
     
     if not webhooks.exists():
-        return
+        return []
     
     # Prepare the payload
-    payload = {
-        'event': event,
-        'tracking_number': shipment.tracking_number,
-        'new_status': shipment.status,
-        'reference_number': shipment.reference_number,
-        'shipment_id': str(shipment.id),
-        'timestamp': datetime.utcnow().isoformat() + 'Z'
-    }
+    if manual_payload:
+        payload = manual_payload
+    else:
+        payload = {
+            'event': event,
+            'tracking_number': shipment.tracking_number,
+            'new_status': shipment.status,
+            'reference_number': shipment.reference_number,
+            'shipment_id': str(shipment.id),
+            'timestamp': datetime.utcnow().isoformat() + 'Z'
+        }
     
     payload_json = json.dumps(payload)
+    logs = []
     
     # Send to each registered webhook
     for webhook in webhooks:
+        status_sent = 'failed'
+        response_data = {}
+        
         try:
             headers = {
                 'Content-Type': 'application/json',
@@ -70,8 +85,15 @@ def send_webhook_notification(shipment: Shipment, event: str):
                 timeout=10  # 10 second timeout
             )
             
+            response_data = {
+                'status_code': response.status_code,
+                'body': response.text[:1000],  # Limit body size
+                'headers': dict(response.headers)
+            }
+            
             if response.status_code >= 200 and response.status_code < 300:
                 logger.info(f"Webhook sent successfully to {webhook.url} for {event}")
+                status_sent = 'succeeded'
             else:
                 logger.warning(
                     f"Webhook to {webhook.url} returned status {response.status_code}"
@@ -79,8 +101,21 @@ def send_webhook_notification(shipment: Shipment, event: str):
                 
         except requests.exceptions.Timeout:
             logger.error(f"Webhook timeout for {webhook.url}")
+            response_data = {'error': 'timeout'}
         except requests.exceptions.RequestException as e:
             logger.error(f"Webhook failed for {webhook.url}: {str(e)}")
+            response_data = {'error': str(e)}
+        
+        # Log the attempt
+        log = SentWebhook.objects.create(
+            webhook=webhook,
+            data_sent=payload,
+            sending_status=status_sent,
+            response_info=response_data
+        )
+        logs.append(log)
+    
+    return logs
 
 
 def update_shipment_status(shipment: Shipment, new_status: str, description: str = None, location: str = '', created_by=None):

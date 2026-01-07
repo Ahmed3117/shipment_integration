@@ -7,7 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 
-from .models import ServiceType, Shipment, TrackingEvent, Webhook
+from .models import ServiceType, Shipment, TrackingEvent, Webhook, SentWebhook
 from .serializers import (
     ServiceTypeSerializer,
     ServiceTypeAdminSerializer,
@@ -27,6 +27,8 @@ from .serializers import (
     SimpleServiceTypeSerializer,
     SimpleShipmentSerializer,
     SimpleWebhookSerializer,
+    SentWebhookSerializer,
+    ManualSentWebhookCreateSerializer,
 )
 from .services import update_shipment_status, send_webhook_notification
 from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin, IsCompany, IsCompanyOrAdmin
@@ -914,4 +916,77 @@ class SimpleWebhookListView(generics.ListAPIView):
         if hasattr(user, 'company') and user.company:
             return Webhook.objects.filter(company=user.company).order_by('-created_at')
         return Webhook.objects.none()
+
+
+# --- Sent Webhooks (Company API) ---
+
+class SentWebhookListView(generics.ListAPIView):
+    """
+    List sent webhooks for the authenticated company.
+    Supports filtering by status and search.
+    """
+    serializer_class = SentWebhookSerializer
+    permission_classes = [IsCompany]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['sending_status', 'webhook']
+    search_fields = ['webhook__url', 'data_sent', 'response_info']
+
+    def get_queryset(self):
+        return SentWebhook.objects.filter(webhook__company=self.request.user.company)
+
+
+class SentWebhookResendView(generics.GenericAPIView):
+    """
+    Resend a failed webhook.
+    """
+    permission_classes = [IsCompany]
+
+    def post(self, request, pk):
+        sent_webhook = get_object_or_404(SentWebhook, pk=pk, webhook__company=request.user.company)
+        
+        # Determine the shipment and event if possible from data_sent
+        data = sent_webhook.data_sent
+        shipment_id = data.get('shipment_id')
+        event = data.get('event', 'webhook.resend')
+        
+        if not shipment_id:
+            return Response({'error': 'Could not identify shipment from the original data.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        shipment = get_object_or_404(Shipment, id=shipment_id, company=request.user.company)
+        
+        # Trigger sending using the same payload
+        logs = send_webhook_notification(shipment, event, manual_payload=data, webhook_id=sent_webhook.webhook_id)
+        
+        if not logs:
+            return Response({'error': 'فشل إعادة إرسال الويب هوك.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return Response({
+            'message': 'تمت إعادة محاولة الإرسال بنجاح.',
+            'sent_webhook': SentWebhookSerializer(logs[0]).data
+        })
+
+
+class SentWebhookManualCreateView(generics.GenericAPIView):
+    """
+    Manually trigger a webhook for a shipment.
+    """
+    serializer_class = ManualSentWebhookCreateSerializer
+    permission_classes = [IsCompany]
+
+    def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        shipment_id = serializer.validated_data['shipment_id']
+        event = serializer.validated_data['event']
+        
+        shipment = get_object_or_404(Shipment, id=shipment_id, company=request.user.company)
+        
+        # Trigger sending
+        logs = send_webhook_notification(shipment, event)
+        
+        return Response({
+            'message': f'تم إرسال الويب هوك اليدوي بنجاح لـ {event}.',
+            'sent_webhooks': SentWebhookSerializer(logs, many=True).data
+        })
 

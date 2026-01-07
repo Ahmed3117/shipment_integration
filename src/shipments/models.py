@@ -41,7 +41,7 @@ class Address(models.Model):
     street = models.CharField(max_length=500)
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=50, choices=STATE_CHOICES)
-    zip_code = models.CharField(max_length=20)
+    zip_code = models.CharField(max_length=20,null=True,blank=True)
     country = models.CharField(max_length=100, default='Egypt')
     phone = models.CharField(max_length=20)
     
@@ -132,10 +132,10 @@ class Shipment(models.Model):
     )
     
     # Package details
-    weight = models.DecimalField(max_digits=10, decimal_places=2, help_text='Weight in kg')
-    length = models.DecimalField(max_digits=10, decimal_places=2, help_text='Length in cm')
-    width = models.DecimalField(max_digits=10, decimal_places=2, help_text='Width in cm')
-    height = models.DecimalField(max_digits=10, decimal_places=2, help_text='Height in cm')
+    weight = models.DecimalField(max_digits=10, decimal_places=2, help_text='Weight in kg',null=True,blank=True)
+    length = models.DecimalField(max_digits=10, decimal_places=2, help_text='Length in cm',null=True,blank=True)
+    width = models.DecimalField(max_digits=10, decimal_places=2, help_text='Width in cm',null=True,blank=True)
+    height = models.DecimalField(max_digits=10, decimal_places=2, help_text='Height in cm',null=True,blank=True)
     content_description = models.TextField(blank=True)
     
     # Service and pricing
@@ -236,3 +236,26 @@ class Webhook(models.Model):
     
     def __str__(self):
         return f"{self.company.name} - {self.url}"
+
+
+class SentWebhook(models.Model):
+    """Log entries for sent webhooks."""
+    webhook = models.ForeignKey(Webhook, on_delete=models.CASCADE, related_name='sent_logs')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    data_sent = models.JSONField(help_text='The JSON payload sent to the webhook',null=True,blank=True)
+    sending_status = models.CharField(
+        max_length=20, 
+        choices=[('succeeded', 'Succeeded'), ('failed', 'Failed')],
+        null=True,
+        blank=True,
+        help_text='Whether the attempt was successful'
+    )
+    response_info = models.JSONField(null=True, blank=True, help_text='Response from the server (status code, body, etc.)')
+
+    class Meta:
+        db_table = 'sent_webhooks'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.webhook.url} - {self.sending_status} at {self.created_at}"

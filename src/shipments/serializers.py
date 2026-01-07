@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
 from decimal import Decimal
-from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook, STATE_CHOICES
+from .models import Address, ServiceType, Shipment, TrackingEvent, Webhook, SentWebhook, STATE_CHOICES
 from accounts.models import Company
 
 
@@ -540,5 +540,27 @@ class BulkAssignCarrierSerializer(serializers.Serializer):
             carrier = User.objects.get(id=value, user_type='carrier')
         except User.DoesNotExist:
             raise serializers.ValidationError('Carrier not found or user is not a carrier.')
+        return value
+
+
+class SentWebhookSerializer(serializers.ModelSerializer):
+    webhook_url = serializers.CharField(source='webhook.url', read_only=True)
+
+    class Meta:
+        model = SentWebhook
+        fields = [
+            'id', 'webhook', 'webhook_url', 'created_at', 'updated_at', 
+            'data_sent', 'sending_status', 'response_info'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ManualSentWebhookCreateSerializer(serializers.Serializer):
+    shipment_id = serializers.IntegerField(required=True)
+    event = serializers.CharField(required=True, help_text="e.g., shipment.created, shipment.status_changed")
+    
+    def validate_shipment_id(self, value):
+        if not Shipment.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Shipment not found.")
         return value
 
