@@ -445,11 +445,12 @@ class SimpleWebhookSerializer(serializers.ModelSerializer):
 
 class WebhookSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
+    company_token = serializers.CharField(source='company.token', read_only=True)
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name']
-        read_only_fields = ['id', 'secret', 'created_at', 'company_name']
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
+        read_only_fields = ['id', 'secret', 'created_at', 'company_name', 'company_token']
     
     def validate_url(self, value):
         if not value.startswith('https://'):
@@ -460,11 +461,12 @@ class WebhookSerializer(serializers.ModelSerializer):
 class WebhookCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating webhooks (secret is auto-generated)."""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    company_token = serializers.CharField(source='company.token', read_only=True)
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'is_active', 'created_at', 'company', 'company_name']
-        read_only_fields = ['id', 'created_at', 'company_name']
+        fields = ['id', 'url', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
+        read_only_fields = ['id', 'created_at', 'company_name', 'company_token']
     
     def validate_url(self, value):
         if not value.startswith('https://'):
@@ -475,10 +477,11 @@ class WebhookCreateSerializer(serializers.ModelSerializer):
 class WebhookDetailSerializer(serializers.ModelSerializer):
     """Serializer showing webhook with secret (only on creation)."""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    company_token = serializers.CharField(source='company.token', read_only=True)
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name']
+        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
         read_only_fields = fields
 
 
