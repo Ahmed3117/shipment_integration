@@ -203,7 +203,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'reference_number', 'sender_address', 'receiver_address',
             'weight', 'length', 'width', 'height', 'content_description',
-            'service_type', 'company', 'carrier', 'is_paid'
+            'service_type', 'company', 'carrier', 'is_paid', 'status'
         ]
         read_only_fields = ['id', 'carrier']
 
@@ -295,12 +295,14 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         from datetime import date, timedelta
         estimated_delivery_date = date.today() + timedelta(days=service_type.estimated_days_max)
         
+        status = validated_data.pop('status', 'created')
+        
         shipment = Shipment.objects.create(
             sender_address=sender,
             receiver_address=receiver,
             estimated_cost=estimated_cost,
             estimated_delivery_date=estimated_delivery_date,
-            status='created',
+            status=status,
             label_url=f'/api/shipments/{{shipment_id}}/label/',
             **validated_data
         )
@@ -319,6 +321,9 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         sender_data = validated_data.pop('sender_address', None)
         receiver_data = validated_data.pop('receiver_address', None)
+        
+        old_status = instance.status
+        new_status = validated_data.get('status', old_status)
         
         # Standard fields update
         for attr, value in validated_data.items():
@@ -351,6 +356,16 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
             if 'service_type' in validated_data:
                 from datetime import date, timedelta
                 instance.estimated_delivery_date = date.today() + timedelta(days=service_type.estimated_days_max)
+        
+        # Create tracking event if status changed
+        if old_status != new_status:
+            request = self.context.get('request')
+            TrackingEvent.objects.create(
+                shipment=instance,
+                status=new_status,
+                description=f"Status changed from {old_status} to {new_status} by admin.",
+                created_by=request.user if request else None
+            )
             
         instance.save()
         return instance
