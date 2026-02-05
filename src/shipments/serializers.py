@@ -303,9 +303,12 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
             estimated_cost=estimated_cost,
             estimated_delivery_date=estimated_delivery_date,
             status=status,
-            label_url=f'/api/shipments/{{shipment_id}}/label/',
             **validated_data
         )
+        
+        # Set label_url after creation so we have the actual shipment ID
+        shipment.label_url = f'/api/shipments/{shipment.id}/label/'
+        shipment.save(update_fields=['label_url'])
         
         # Create initial tracking event
         location = f"{sender.city}, {sender.state}" if sender else None
