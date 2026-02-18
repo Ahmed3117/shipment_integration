@@ -465,6 +465,46 @@ class LabelDownloadView(generics.GenericAPIView):
         return response
 
 
+class ShipmentLabelPDFView(generics.GenericAPIView):
+    """Generate and download an Aramex-style shipping label PDF."""
+    permission_classes = [IsCompany]
+
+    def get(self, request, tracking_number):
+        from django.http import HttpResponse
+        from .pdf_label import generate_shipment_label_pdf
+
+        user = request.user
+
+        # Lookup shipment
+        shipment = Shipment.objects.filter(tracking_number=tracking_number).first()
+        if not shipment:
+            from django.http import Http404
+            raise Http404
+
+        # Ownership check
+        user_company = getattr(user, 'company', None)
+        if not user.is_superuser and shipment.company != user_company:
+            return Response(
+                {'error': 'هذه الشحنة غير تابعة لهذة الشركة'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if shipment.status == 'cancelled':
+            return Response(
+                {'error': 'لا يمكن إنشاء ملصق لشحنة ملغاة.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Generate PDF
+        pdf_bytes = generate_shipment_label_pdf(shipment)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = (
+            f'attachment; filename="label_{shipment.tracking_number}.pdf"'
+        )
+        return response
+
+
 # --- Tracking ---
 class TrackShipmentView(generics.GenericAPIView):
     """Track a shipment by tracking number."""
