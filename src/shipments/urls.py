@@ -24,6 +24,7 @@ from .views import (
     SentWebhookListView,
     SentWebhookResendView,
     SentWebhookManualCreateView,
+    ShipmentLabelPDFView,
 )
 from rest_framework.routers import DefaultRouter
 
@@ -67,6 +68,7 @@ urlpatterns = [
     path('<str:tracking_number>/cancel/', ShipmentCancelView.as_view(), name='shipment-cancel'),
     path('<str:tracking_number>/label/', ShipmentLabelView.as_view(), name='shipment-label'),
     path('<str:shipment_id>/label/download/', LabelDownloadView.as_view(), name='shipment-label-download'),
+    path('<str:tracking_number>/pdf/', ShipmentLabelPDFView.as_view(), name='shipment-label-pdf'),
     path('<str:tracking_number>/status/', ShipmentStatusUpdateView.as_view(), name='shipment-status-update'),
 
     # ─────────────────────────────────────────────────────────────────
