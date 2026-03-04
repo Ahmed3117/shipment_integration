@@ -84,13 +84,15 @@ class ServiceType(models.Model):
 class Shipment(models.Model):
     """Main shipment model."""
     STATUS_CHOICES = [
-        ('created', 'Created'),
-        ('picked_up', 'Picked Up'),
-        ('in_transit', 'In Transit'),
-        ('out_for_delivery', 'Out for Delivery'),
-        ('delivered', 'Delivered'),
-        ('cancelled', 'Cancelled'),
-        ('returned', 'Returned'),
+        ('CREATED', 'Created'),
+        ('PREPARING', 'Preparing'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('OUT_FOR_DELIVERY', 'Out For Delivery'),
+        ('DELIVERED', 'Delivered'),
+        ('CANCELLED', 'Cancelled'),
+        ('RETURNED', 'Returned'),
+        ('FAILED_DELIVERY', 'Failed Delivery'),
+        ('EXCEPTION', 'Exception'),
     ]
     
     # id = models.BigAutoField(primary_key=True)  # Default BigAutoField
@@ -144,7 +146,7 @@ class Shipment(models.Model):
     estimated_delivery_date = models.DateField(null=True, blank=True)
     
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='created')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CREATED')
     is_paid = models.BooleanField(default=False)
     
     # Label
@@ -166,7 +168,7 @@ class Shipment(models.Model):
     def generate_tracking_number(self):
         import random
         # 10 numeric digits
-        return ''.join([str(random.randint(0, 9)) for _ in range(10)])
+        return 'et' + ''.join([str(random.randint(0, 9)) for _ in range(10)])
     
     def __str__(self):
         return f"{self.tracking_number} - {self.status}"

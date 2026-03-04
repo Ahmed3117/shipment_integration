@@ -295,7 +295,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         from datetime import date, timedelta
         estimated_delivery_date = date.today() + timedelta(days=service_type.estimated_days_max)
         
-        status = validated_data.pop('status', 'created')
+        status = validated_data.pop('status', 'CREATED')
         
         shipment = Shipment.objects.create(
             sender_address=sender,
@@ -314,7 +314,7 @@ class ShipmentCreateSerializer(serializers.ModelSerializer):
         location = f"{sender.city}, {sender.state}" if sender else None
         TrackingEvent.objects.create(
             shipment=shipment,
-            status='created',
+            status='CREATED',
             description='Shipment created successfully.',
             location=location
         )
@@ -506,8 +506,9 @@ class WebhookDetailSerializer(serializers.ModelSerializer):
 # --- Status Update Serializer ---
 class ShipmentStatusUpdateSerializer(serializers.Serializer):
     STATUS_CHOICES = [
-        'created', 'picked_up', 'in_transit',
-        'out_for_delivery', 'delivered', 'cancelled', 'returned'
+        'CREATED', 'PREPARING', 'IN_TRANSIT',
+        'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED',
+        'RETURNED', 'FAILED_DELIVERY', 'EXCEPTION'
     ]
     
     status = serializers.ChoiceField(choices=STATUS_CHOICES)
