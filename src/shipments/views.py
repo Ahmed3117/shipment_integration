@@ -336,7 +336,7 @@ class ShipmentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.status not in ['pending', 'cancelled']:
+        if instance.status not in ['CREATED', 'CANCELLED']:
             return Response(
                 {'error': 'يمكن حذف الشحنات المعلقة أو الملغاة فقط.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -366,22 +366,22 @@ class ShipmentCancelView(generics.GenericAPIView):
         if not user.is_superuser and shipment.company != user_company:
             return Response({'error': 'هذه الشحنة غير تابعة لهذة الشركة'}, status=status.HTTP_403_FORBIDDEN)
         
-        if shipment.status in ['delivered', 'cancelled']:
+        if shipment.status in ['DELIVERED', 'CANCELLED']:
             return Response({
                 'error': f'لا يمكن إلغاء الشحنة بالحالة: {shipment.status}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        if shipment.status in ['picked_up', 'in_transit', 'out_for_delivery']:
+        if shipment.status in ['IN_TRANSIT', 'OUT_FOR_DELIVERY']:
             return Response({
                 'error': 'لا يمكن إلغاء شحنة قيد النقل بالفعل. يرجى الاتصال بالدعم.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        shipment.status = 'cancelled'
+        shipment.status = 'CANCELLED'
         shipment.save()
         
         TrackingEvent.objects.create(
             shipment=shipment,
-            status='cancelled',
+            status='CANCELLED',
             description='Shipment cancelled by user.',
             location=None
         )
@@ -413,7 +413,7 @@ class ShipmentLabelView(generics.GenericAPIView):
         if not user.is_superuser and shipment.company != user_company:
             return Response({'error': 'هذه الشحنة غير تابعة لهذة الشركة'}, status=status.HTTP_403_FORBIDDEN)
         
-        if shipment.status == 'cancelled':
+        if shipment.status == 'CANCELLED':
             return Response({
                 'error': 'لا يمكن إنشاء ملصق لشحنة ملغاة.'
             }, status=status.HTTP_400_BAD_REQUEST)
@@ -489,7 +489,7 @@ class ShipmentLabelPDFView(generics.GenericAPIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if shipment.status == 'cancelled':
+        if shipment.status == 'CANCELLED':
             return Response(
                 {'error': 'لا يمكن إنشاء ملصق لشحنة ملغاة.'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -612,12 +612,12 @@ class ShipmentStatusUpdateView(generics.GenericAPIView):
         location = serializer.validated_data.get('location', '')
         
         # Validate status transition
-        if shipment.status == 'cancelled':
+        if shipment.status == 'CANCELLED':
             return Response({
                 'error': 'لا يمكن تحديث حالة شحنة ملغاة.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        if shipment.status == 'delivered' and new_status != 'returned':
+        if shipment.status == 'DELIVERED' and new_status != 'RETURNED':
             return Response({
                 'error': 'الشحنة المسلمة يمكن تغييرها فقط إلى مرتجعة.'
             }, status=status.HTTP_400_BAD_REQUEST)
@@ -747,14 +747,14 @@ class CarrierStatusUpdateByScanView(generics.GenericAPIView):
                 'error': f'الشحنة معينة بالفعل لناقل آخر ({shipment.carrier.username}).'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Perform assignment and update status to picked_up
+        # Perform assignment and update status to IN_TRANSIT
         shipment.carrier = request.user
         shipment.save(update_fields=['carrier'])
 
         from .utils import update_shipment_status
         update_shipment_status(
             shipment=shipment,
-            new_status='picked_up',
+            new_status='IN_TRANSIT',
             description='Shipment picked up and assigned to carrier.',
             created_by=request.user
         )
@@ -763,7 +763,7 @@ class CarrierStatusUpdateByScanView(generics.GenericAPIView):
             'message': 'تم استلام الشحنة بنجاح.',
             'shipment_id': shipment.id,
             'tracking_number': shipment.tracking_number,
-            'status': 'picked_up',
+            'status': 'IN_TRANSIT',
             'assigned_to': request.user.email
         })
 

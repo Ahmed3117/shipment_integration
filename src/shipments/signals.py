@@ -40,5 +40,5 @@ def handle_status_change(sender, instance, created, **kwargs):
         send_webhook_notification(instance, 'shipment.status_changed')
         
         # Send specific event for delivered
-        if new_status == 'delivered':
+        if new_status == 'DELIVERED':
             send_webhook_notification(instance, 'shipment.delivered')
