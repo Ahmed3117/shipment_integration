@@ -32,6 +32,7 @@ from .serializers import (
 )
 from .services import update_shipment_status, send_webhook_notification
 from .permissions import IsAdmin, IsCarrier, IsCarrierOrAdmin, IsCompany, IsCompanyOrAdmin
+from accounts.pagination import CustomPageNumberPagination
 from accounts.authentication import CompanyUser
 from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
@@ -44,6 +45,7 @@ class ServiceTypeListView(generics.ListAPIView):
     """
     serializer_class = ServiceTypeSerializer
     permission_classes = [IsCompany]
+    pagination_class = CustomPageNumberPagination
     
     def get_queryset(self):
         # Strict filtering: only return services for the authenticated company
@@ -62,6 +64,7 @@ class AdminServiceTypeViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ServiceTypeAdminSerializer
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company', 'is_active']
     search_fields = ['name', 'code', 'company__name']
@@ -170,6 +173,7 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
     Requires Company token authentication.
     """
     permission_classes = [AllowAny]
+    pagination_class = CustomPageNumberPagination
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -536,6 +540,7 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
     Admins can only see and manage webhooks for their own company.
     """
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company', 'is_active']
     search_fields = ['company__name', 'company__phone', 'url', 'secret']
@@ -648,6 +653,7 @@ class CarrierShipmentListView(generics.ListAPIView):
     """
     serializer_class = CarrierShipmentListSerializer
     permission_classes = [IsCarrier]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company', 'service_type', 'status', 'sender_address__state', 'receiver_address__state']
     search_fields = ['company__name', 'company__token', 'company__email', 'company__phone', 'carrier__name', 'carrier__username']
@@ -776,6 +782,7 @@ class AdminShipmentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ShipmentDetailSerializer
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company', 'carrier', 'service_type', 'status', 'sender_address__state', 'receiver_address__state']
     search_fields = ['company__name', 'company__token', 'company__email', 'company__phone', 'carrier__name', 'carrier__username', 'carrier__email', 'carrier__phone', 'tracking_number', 'reference_number']
@@ -922,7 +929,7 @@ class SimpleShipmentListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleShipmentSerializer
-    pagination_class = None
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company']
     
@@ -945,7 +952,7 @@ class SimpleWebhookListView(generics.ListAPIView):
     """
     permission_classes = [IsAdmin]
     serializer_class = SimpleWebhookSerializer
-    pagination_class = None
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company']
 
@@ -967,6 +974,7 @@ class SentWebhookListView(generics.ListAPIView):
     """
     serializer_class = SentWebhookSerializer
     permission_classes = [IsCompany]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['sending_status', 'webhook']
     search_fields = ['webhook__url', 'data_sent', 'response_info']

@@ -23,6 +23,7 @@ from .serializers import (
 )
 
 from shipments.permissions import IsAdmin, IsSuperuser, IsCarrierOrAdmin
+from accounts.pagination import CustomPageNumberPagination
 from rest_framework import filters
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -40,6 +41,7 @@ class SuperuserCompanyListCreateView(generics.ListCreateAPIView):
     """
     queryset = Company.objects.all()
     permission_classes = [IsSuperuser]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'phone', 'email', 'token']
@@ -136,6 +138,7 @@ class SuperuserUserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserListSerializer
     permission_classes = [IsSuperuser]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['user_type', 'company', 'is_active']
     search_fields = ['company__name', 'name', 'phone', 'email', 'username']
@@ -192,6 +195,7 @@ class CompanyListCreateView(generics.ListAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     
     def get_queryset(self):
         user = self.request.user
@@ -255,6 +259,7 @@ class UserListCreateView(generics.ListCreateAPIView):
     """
 
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['user_type', 'company', 'is_active']
     search_fields = ['company__name', 'name', 'phone', 'email', 'username']
@@ -329,6 +334,7 @@ class CarrierListView(generics.ListAPIView):
     """
     serializer_class = CarrierSerializer
     permission_classes = [IsAdmin]
+    pagination_class = CustomPageNumberPagination
     
     def get_queryset(self):
         user = self.request.user
