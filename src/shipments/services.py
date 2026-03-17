@@ -50,13 +50,20 @@ def send_webhook_notification(shipment: Shipment, event: str, manual_payload: di
     if manual_payload:
         payload = manual_payload
     else:
+        description = f"Status changed to {shipment.get_status_display()}"
+        latest_event = shipment.tracking_events.first()
+        if latest_event and latest_event.description:
+            description = latest_event.description
+            
         payload = {
-            'event': event,
-            'tracking_number': shipment.tracking_number,
-            'new_status': shipment.status,
-            'reference_number': shipment.reference_number,
-            'shipment_id': str(shipment.id),
-            'timestamp': datetime.utcnow().isoformat() + 'Z'
+            "action": "handleShipmentCallback",
+            "mode": "Production",
+            "payload": {
+                "tracking_number": shipment.tracking_number,
+                "status": shipment.status,
+                "description": description,
+                "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+            }
         }
     
     payload_json = json.dumps(payload)
@@ -73,10 +80,9 @@ def send_webhook_notification(shipment: Shipment, event: str, manual_payload: di
                 'X-Webhook-Event': event,
             }
             
-            # Add signature using the webhook secret
+            # Add apikey header for authentication
             if webhook.secret:
-                signature = generate_webhook_signature(webhook.secret, payload_json)
-                headers['X-Webhook-Signature'] = signature
+                headers['apikey'] = webhook.secret
             
             response = requests.post(
                 webhook.url,
