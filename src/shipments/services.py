@@ -57,7 +57,7 @@ def send_webhook_notification(shipment: Shipment, event: str, manual_payload: di
             
         payload = {
             "action": "handleShipmentCallback",
-            "mode": "Production",
+            "mode": "production",
             "payload": {
                 "tracking_number": shipment.tracking_number,
                 "status": shipment.status,
