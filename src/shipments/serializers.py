@@ -467,7 +467,7 @@ class WebhookSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
+        fields = ['id', 'url', 'secret', 'access_token', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
         read_only_fields = ['id', 'secret', 'created_at', 'company_name', 'company_token']
     
     def validate_url(self, value):
@@ -483,7 +483,7 @@ class WebhookCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
+        fields = ['id', 'url', 'access_token', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
         read_only_fields = ['id', 'created_at', 'company_name', 'company_token']
     
     def validate_url(self, value):
@@ -499,7 +499,7 @@ class WebhookDetailSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Webhook
-        fields = ['id', 'url', 'secret', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
+        fields = ['id', 'url', 'secret', 'access_token', 'is_active', 'created_at', 'company', 'company_name', 'company_token']
         read_only_fields = fields
 
 

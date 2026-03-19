@@ -222,6 +222,7 @@ class Webhook(models.Model):
         help_text='Secret sent with each webhook for validation'
     )
     is_active = models.BooleanField(default=True)
+    access_token = models.TextField(null=True, blank=True, help_text='Optional access token sent in Authorization header (Bearer)')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
