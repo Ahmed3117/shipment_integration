@@ -84,6 +84,10 @@ def send_webhook_notification(shipment: Shipment, event: str, manual_payload: di
             if webhook.secret:
                 headers['apikey'] = webhook.secret
             
+            # Add Authorization header if access token exists
+            if hasattr(webhook, 'access_token') and webhook.access_token:
+                headers['Authorization'] = f"Bearer {webhook.access_token}"
+            
             response = requests.post(
                 webhook.url,
                 data=payload_json,

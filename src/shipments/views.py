@@ -543,7 +543,7 @@ class AdminWebhookViewSet(viewsets.ModelViewSet):
     pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['company', 'is_active']
-    search_fields = ['company__name', 'company__phone', 'url', 'secret']
+    search_fields = ['company__name', 'company__phone', 'url', 'secret', 'access_token']
     lookup_field = 'pk'
     
     def get_serializer_class(self):
