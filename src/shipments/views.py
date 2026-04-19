@@ -1038,3 +1038,16 @@ class SentWebhookManualCreateView(generics.GenericAPIView):
             'sent_webhooks': SentWebhookSerializer(logs, many=True).data
         })
 
+
+
+
+class ChangeStatusView(generics.GenericAPIView):
+    permission_classes = [IsCompany]
+    
+    def post(self, request, tracking_number):
+        
+        shipment = get_object_or_404(Shipment, tracking_number=tracking_number, company=request.user.company)
+        shipment.status = request.data.get("status")
+        shipment.save(update_fields=['status'])
+        
+        return Response({"message": "تم تحديث الشحنه بنجاح"},status=status.HTTP_200_OK)

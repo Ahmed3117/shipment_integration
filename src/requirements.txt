@@ -8,3 +8,5 @@ python-barcode[images]>=0.15.1
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 django-filter>=23.5
+arabic-reshaper 
+python-bidi

@@ -22,13 +22,21 @@ class CompanySerializer(serializers.ModelSerializer):
 class AddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = Address
-        fields = ['id', 'name', 'street', 'city', 'state', 'zip_code', 'country', 'phone']
+        fields = ['id', 'name', 'street', 'city', 'state', 'zip_code', 'country', 'phone', 'alt_phone']
     
     def validate_phone(self, value):
         # Remove non-digit characters for validation
         digits = ''.join(filter(str.isdigit, value))
         if len(digits) < 10:
             raise serializers.ValidationError('Invalid phone number. Must have at least 10 digits.')
+        return value
+
+    def validate_alt_phone(self, value):
+        if value in (None, ''):
+            return value
+        digits = ''.join(filter(str.isdigit, value))
+        if len(digits) < 10:
+            raise serializers.ValidationError('Invalid alternative phone number. Must have at least 10 digits.')
         return value
     
     def validate_zip_code(self, value):

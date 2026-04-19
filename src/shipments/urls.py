@@ -3,6 +3,7 @@ from django.urls import path, include
 from .views import (
     ServiceTypeListView,
     CalculateRatesView,
+    ChangeStatusView,
     ShipmentListCreateView,
     ShipmentDetailView,
     ShipmentCancelView,
@@ -77,4 +78,5 @@ urlpatterns = [
     path('simple/service-types/', SimpleServiceTypeListView.as_view(), name='simple-service-type-list'),
     path('simple/shipments/', SimpleShipmentListView.as_view(), name='simple-shipment-list'),
     path('simple/webhooks/', SimpleWebhookListView.as_view(), name='simple-webhook-list'),
+    path('change-status/<str:tracking_number>/',ChangeStatusView.as_view(), name='webhook-active-status'),
 ]
